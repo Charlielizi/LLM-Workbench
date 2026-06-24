@@ -1,0 +1,17 @@
+node_modules/
+.pnpm-store/
+.vite/
+out/
+dist/
+coverage/
+*.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.DS_Store
+.dotnet/
+**/bin/
+**/obj/
+.vs/
+audit-publish/
+publish/

@@ -1,0 +1,16 @@
+packages:
+  - apps/*
+  - packages/*
+
+nodeLinker: hoisted
+
+blockExoticSubdeps: false
+
+allowBuilds:
+  better-sqlite3: false
+  electron: true
+  electron-winstaller: true
+  esbuild: true
+
+minimumReleaseAgeExclude:
+  - electron@42.5.0
