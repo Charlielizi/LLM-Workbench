@@ -14,10 +14,20 @@
   "dependencies": {
     "@aihub/adapters": "workspace:*",
     "@aihub/core": "workspace:*",
+    "@tailwindcss/vite": "^4.3.1",
     "electron-squirrel-startup": "^1.0.1",
+    "highlight.js": "^11.11.1",
+    "katex": "^0.16.25",
+    "lucide-react": "^1.21.0",
+    "pdfjs-dist": "^6.0.227",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "zod": "^3.25.67"
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1",
+    "tailwindcss": "^4.3.1",
+    "zod": "^3.25.67",
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@electron-forge/cli": "^7.11.2",

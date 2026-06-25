@@ -35,11 +35,14 @@ public sealed class AppDatabase : IDisposable
               parent_message_id TEXT,
               stop_reason TEXT,
               error_code TEXT,
-              mode_snapshot TEXT
+              mode_snapshot TEXT,
+              model_snapshot TEXT,
+              html TEXT
             );
             CREATE TABLE IF NOT EXISTS attachments (
               id TEXT PRIMARY KEY,
               message_id TEXT NOT NULL,
+              local_path TEXT NOT NULL DEFAULT '',
               name TEXT NOT NULL,
               kind TEXT NOT NULL,
               size INTEGER NOT NULL,
@@ -57,6 +60,9 @@ public sealed class AppDatabase : IDisposable
         EnsureColumn("messages", "stop_reason", "TEXT");
         EnsureColumn("messages", "error_code", "TEXT");
         EnsureColumn("messages", "mode_snapshot", "TEXT");
+        EnsureColumn("messages", "model_snapshot", "TEXT");
+        EnsureColumn("messages", "html", "TEXT");
+        EnsureColumn("attachments", "local_path", "TEXT NOT NULL DEFAULT ''");
     }
 
     public ConversationRecord CreateConversation(ProviderId provider)
@@ -88,9 +94,9 @@ public sealed class AppDatabase : IDisposable
         using var command = _connection.CreateCommand();
         command.CommandText = """
             INSERT INTO messages(id, conversation_id, provider, role, text, status, created_at,
-              parent_message_id, stop_reason, error_code, mode_snapshot)
+              parent_message_id, stop_reason, error_code, mode_snapshot, model_snapshot, html)
             VALUES($id, $conversation, $provider, $role, $text, $status, $created,
-              $parent, $stop, $error, $mode);
+              $parent, $stop, $error, $mode, $model, $html);
             UPDATE conversations SET updated_at=$created WHERE id=$conversation;
             """;
         command.Parameters.AddWithValue("$id", message.Id);
@@ -104,6 +110,8 @@ public sealed class AppDatabase : IDisposable
         command.Parameters.AddWithValue("$stop", (object?)message.StopReason ?? DBNull.Value);
         command.Parameters.AddWithValue("$error", (object?)message.ErrorCode ?? DBNull.Value);
         command.Parameters.AddWithValue("$mode", (object?)message.ModeSnapshot ?? DBNull.Value);
+        command.Parameters.AddWithValue("$model", (object?)message.ModelSnapshot ?? DBNull.Value);
+        command.Parameters.AddWithValue("$html", (object?)message.Html ?? DBNull.Value);
         command.ExecuteNonQuery();
     }
 
@@ -111,18 +119,20 @@ public sealed class AppDatabase : IDisposable
         string id,
         string text,
         string status,
-        string? errorCode = null)
+        string? errorCode = null,
+        string? html = null)
     {
         using var command = _connection.CreateCommand();
         command.CommandText = """
             UPDATE messages
-            SET text=$text, status=$status, error_code=$error
+            SET text=$text, status=$status, error_code=$error, html=COALESCE($html, html)
             WHERE id=$id
             """;
         command.Parameters.AddWithValue("$id", id);
         command.Parameters.AddWithValue("$text", text);
         command.Parameters.AddWithValue("$status", status);
         command.Parameters.AddWithValue("$error", (object?)errorCode ?? DBNull.Value);
+        command.Parameters.AddWithValue("$html", (object?)html ?? DBNull.Value);
         command.ExecuteNonQuery();
     }
 
@@ -130,11 +140,12 @@ public sealed class AppDatabase : IDisposable
     {
         using var command = _connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO attachments(id, message_id, name, kind, size, status, error)
-            VALUES($id, $message, $name, $kind, $size, $status, $error)
+            INSERT INTO attachments(id, message_id, local_path, name, kind, size, status, error)
+            VALUES($id, $message, $path, $name, $kind, $size, $status, $error)
             """;
         command.Parameters.AddWithValue("$id", attachment.Id);
         command.Parameters.AddWithValue("$message", attachment.MessageId);
+        command.Parameters.AddWithValue("$path", attachment.LocalPath);
         command.Parameters.AddWithValue("$name", attachment.Name);
         command.Parameters.AddWithValue("$kind", attachment.Kind.ToString());
         command.Parameters.AddWithValue("$size", attachment.Size);
@@ -167,6 +178,7 @@ public sealed class AppDatabase : IDisposable
             result.Add(new AttachmentRecord(
                 reader.GetString(reader.GetOrdinal("id")),
                 reader.GetString(reader.GetOrdinal("message_id")),
+                reader.GetString(reader.GetOrdinal("local_path")),
                 reader.GetString(reader.GetOrdinal("name")),
                 Enum.Parse<AttachmentKind>(reader.GetString(reader.GetOrdinal("kind"))),
                 reader.GetInt64(reader.GetOrdinal("size")),
@@ -263,7 +275,9 @@ public sealed class AppDatabase : IDisposable
                 reader.IsDBNull(reader.GetOrdinal("parent_message_id")) ? null : reader.GetString(reader.GetOrdinal("parent_message_id")),
                 reader.IsDBNull(reader.GetOrdinal("stop_reason")) ? null : reader.GetString(reader.GetOrdinal("stop_reason")),
                 reader.IsDBNull(reader.GetOrdinal("error_code")) ? null : reader.GetString(reader.GetOrdinal("error_code")),
-                reader.IsDBNull(reader.GetOrdinal("mode_snapshot")) ? null : reader.GetString(reader.GetOrdinal("mode_snapshot"))));
+                reader.IsDBNull(reader.GetOrdinal("mode_snapshot")) ? null : reader.GetString(reader.GetOrdinal("mode_snapshot")),
+                reader.IsDBNull(reader.GetOrdinal("html")) ? null : reader.GetString(reader.GetOrdinal("html")),
+                reader.IsDBNull(reader.GetOrdinal("model_snapshot")) ? null : reader.GetString(reader.GetOrdinal("model_snapshot"))));
         }
         return result;
     }

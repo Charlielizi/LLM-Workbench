@@ -81,4 +81,221 @@ describe("AppDatabase", () => {
     ]);
     expect(database.listConversations(true)).toHaveLength(2);
   });
+
+  it("searches title and message content", () => {
+    database = new AppDatabase(":memory:");
+    database.createConversation({
+      id: "searchable",
+      title: "Release planning",
+      provider: "chatgpt",
+    });
+    database.addMessage({
+      id: "search-message",
+      conversationId: "searchable",
+      role: "user",
+      content: [{ type: "text", text: "Discuss the database migration." }],
+      status: "completed",
+      provider: "chatgpt",
+      createdAt: new Date().toISOString(),
+    });
+
+    expect(database.searchConversations("Release")[0]?.id).toBe("searchable");
+    expect(database.searchConversations("migration")[0]?.id).toBe(
+      "searchable",
+    );
+  });
+
+  it("pins, renames, and deletes conversations", () => {
+    database = new AppDatabase(":memory:");
+    database.createConversation({
+      id: "managed",
+      title: "Original",
+      provider: "claude",
+    });
+
+    database.setConversationPinned("managed", true);
+    database.renameConversation("managed", "Renamed");
+    expect(database.getConversation("managed")).toMatchObject({
+      title: "Renamed",
+      pinned: true,
+    });
+
+    database.deleteConversation("managed");
+    expect(database.getConversation("managed")).toBeUndefined();
+  });
+
+  it("deletes a message and all later messages for edit-resend", () => {
+    database = new AppDatabase(":memory:");
+    database.createConversation({
+      id: "editable",
+      title: "Editable",
+      provider: "chatgpt",
+    });
+    for (const [index, role] of ["user", "assistant", "user"] .entries()) {
+      database.addMessage({
+        id: `edit-message-${index}`,
+        conversationId: "editable",
+        role: role as "user" | "assistant",
+        content: [{ type: "text", text: `message ${index}` }],
+        status: "completed",
+        provider: "chatgpt",
+        createdAt: new Date(Date.now() + index).toISOString(),
+      });
+    }
+
+    database.deleteMessagesFrom("editable", "edit-message-1");
+    expect(
+      database
+        .getConversation("editable")
+        ?.messages.map((message) => message.id),
+    ).toEqual(["edit-message-0"]);
+  });
+
+  it("stores system prompts and resolves provider defaults", () => {
+    database = new AppDatabase(":memory:");
+    const now = new Date().toISOString();
+    database.createSystemPrompt({
+      id: "global-prompt",
+      name: "Global",
+      content: "Global instruction",
+      isDefault: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+    database.createSystemPrompt({
+      id: "claude-prompt",
+      name: "Claude",
+      content: "Claude instruction",
+      provider: "claude",
+      isDefault: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    expect(database.getDefaultSystemPrompt("chatgpt")?.id).toBe(
+      "global-prompt",
+    );
+    expect(database.getDefaultSystemPrompt("claude")?.id).toBe(
+      "claude-prompt",
+    );
+  });
+
+  it("persists comparison sessions and participants", () => {
+    database = new AppDatabase(":memory:");
+    database.createConversation({
+      id: "compare-a",
+      title: "A",
+      provider: "chatgpt",
+    });
+    database.createConversation({
+      id: "compare-b",
+      title: "B",
+      provider: "claude",
+    });
+    const now = new Date().toISOString();
+    database.createComparisonSession({
+      id: "comparison",
+      title: "Compare",
+      participants: [
+        { conversationId: "compare-a", provider: "chatgpt" },
+        { conversationId: "compare-b", provider: "claude" },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    expect(database.getComparisonSession("comparison")?.participants).toHaveLength(
+      2,
+    );
+  });
+
+  it("stores knowledge documents, folders, tags, and settings", () => {
+    database = new AppDatabase(":memory:");
+    const conversation = database.createConversation({
+      id: "organized",
+      title: "Organized",
+      provider: "chatgpt",
+    });
+    const now = new Date().toISOString();
+    database.addDocument({
+      id: "document",
+      name: "notes.md",
+      filePath: "C:\\notes.md",
+      content: "Local knowledge content",
+      mimeType: "text/markdown",
+      sizeBytes: 100,
+      createdAt: now,
+      updatedAt: now,
+    });
+    database.createFolder({
+      id: "folder",
+      name: "Research",
+      createdAt: now,
+    });
+    database.createTag({
+      id: "tag",
+      name: "Important",
+      color: "#7ce6ae",
+      createdAt: now,
+    });
+    database.setConversationDocuments(conversation.id, ["document"]);
+    database.setConversationFolder(conversation.id, "folder");
+    database.setConversationTags(conversation.id, ["tag"]);
+    database.setSettings({ theme: "dark", sidebarWidth: 300 });
+
+    expect(database.getConversation(conversation.id)).toMatchObject({
+      documentIds: ["document"],
+      folderId: "folder",
+      tagIds: ["tag"],
+    });
+    expect(database.listDocuments()[0]?.name).toBe("notes.md");
+    expect(database.getSettings()).toMatchObject({
+      theme: "dark",
+      sidebarWidth: 300,
+    });
+  });
+
+  it("uses FTS5 for message content search", () => {
+    database = new AppDatabase(":memory:");
+    database.createConversation({
+      id: "fts-conversation",
+      title: "Unrelated title",
+      provider: "chatgpt",
+    });
+    database.addMessage({
+      id: "fts-message",
+      conversationId: "fts-conversation",
+      role: "user",
+      content: [{ type: "text", text: "electrochemical impedance" }],
+      status: "completed",
+      provider: "chatgpt",
+      createdAt: new Date().toISOString(),
+    });
+    expect(database.searchConversations("electrochemical")[0]?.id).toBe(
+      "fts-conversation",
+    );
+  });
+
+  it("persists provider html for assistant messages", () => {
+    database = new AppDatabase(":memory:");
+    database.createConversation({
+      id: "html-conversation",
+      title: "Provider HTML",
+      provider: "chatgpt",
+    });
+    database.addMessage({
+      id: "html-message",
+      conversationId: "html-conversation",
+      role: "assistant",
+      content: [{ type: "text", text: "Rendered answer" }],
+      providerHtml: "<div class='markdown'><p><strong>Rendered answer</strong></p></div>",
+      status: "completed",
+      provider: "chatgpt",
+      createdAt: new Date().toISOString(),
+    });
+
+    expect(
+      database.getConversation("html-conversation")?.messages[0]?.providerHtml,
+    ).toContain("<strong>Rendered answer</strong>");
+  });
 });

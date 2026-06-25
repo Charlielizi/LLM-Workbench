@@ -95,57 +95,7 @@
                     </Grid>
                 </Border>
 
-                <ScrollViewer x:Name="MessageScroller" Grid.Row="1"
-                              VerticalScrollBarVisibility="Auto"
-                              ScrollChanged="MessageScroller_OnScrollChanged">
-                    <ItemsControl x:Name="MessageList" Margin="24,14">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Border Margin="0,7" Padding="18,15" CornerRadius="14"
-                                        Background="{Binding Background}"
-                                        HorizontalAlignment="{Binding Alignment}"
-                                        MinWidth="190" MaxWidth="780">
-                                    <StackPanel>
-                                        <Grid>
-                                            <TextBlock Text="{Binding Author}"
-                                                       Foreground="{DynamicResource SecondaryText}"
-                                                       FontSize="12" FontWeight="SemiBold"/>
-                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                                <Button Content="复制" Padding="7,3"
-                                                        Tag="{Binding}" Click="CopyMessage_OnClick"/>
-                                                <Button x:Name="RetryButton" Content="重试" Padding="7,3"
-                                                        Tag="{Binding}" Click="RetryMessage_OnClick"/>
-                                                <Button x:Name="EditButton" Content="编辑" Padding="7,3"
-                                                        Tag="{Binding}" Click="EditMessage_OnClick"/>
-                                            </StackPanel>
-                                        </Grid>
-                                        <Grid Margin="0,7,0,0">
-                                            <TextBlock x:Name="PlainMessage" Text="{Binding Text}"
-                                                       Foreground="{DynamicResource PrimaryText}"
-                                                       TextWrapping="Wrap" FontSize="16.5" LineHeight="27"
-                                                       FontFamily="Segoe UI Variable Text, Microsoft YaHei UI, Segoe UI"/>
-                                            <local:MarkdownViewer x:Name="MarkdownMessage"
-                                                                  Markdown="{Binding Text}"
-                                                                  Visibility="Collapsed"/>
-                                        </Grid>
-                                        <TextBlock Text="{Binding StatusLabel}" Margin="0,7,0,0"
-                                                   Foreground="#E4A675" FontSize="11"/>
-                                    </StackPanel>
-                                </Border>
-                                <DataTemplate.Triggers>
-                                    <DataTrigger Binding="{Binding IsMarkdown}" Value="True">
-                                        <Setter TargetName="PlainMessage" Property="Visibility" Value="Collapsed"/>
-                                        <Setter TargetName="MarkdownMessage" Property="Visibility" Value="Visible"/>
-                                        <Setter TargetName="EditButton" Property="Visibility" Value="Collapsed"/>
-                                    </DataTrigger>
-                                    <DataTrigger Binding="{Binding IsUser}" Value="True">
-                                        <Setter TargetName="RetryButton" Property="Visibility" Value="Collapsed"/>
-                                    </DataTrigger>
-                                </DataTemplate.Triggers>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
+                <Grid x:Name="MessageViewHost" Grid.Row="1"/>
 
                 <Border Grid.Row="2" Margin="24,8,24,20"
                         Background="{DynamicResource SurfaceBackground}"
@@ -161,12 +111,20 @@
                         <TextBox x:Name="ComposerBox" Grid.Row="1" MinHeight="76" MaxHeight="190"
                                  AcceptsReturn="True" TextWrapping="Wrap" BorderThickness="0"
                                  Padding="15" FontSize="15" VerticalScrollBarVisibility="Auto"
+                                 AllowDrop="True"
                                  TextChanged="ComposerBox_OnTextChanged"
-                                 KeyDown="ComposerBox_OnKeyDown"/>
+                                 KeyDown="ComposerBox_OnKeyDown"
+                                 PreviewKeyDown="ComposerBox_OnPreviewKeyDown"
+                                 PreviewDragOver="ComposerBox_OnPreviewDragOver"
+                                 Drop="ComposerBox_OnDrop"/>
                         <Grid Grid.Row="2" Margin="10,0">
                             <StackPanel Orientation="Horizontal">
                                 <Button x:Name="AttachButton" Content="＋ 附件"
                                         Click="AttachButton_OnClick" Visibility="Collapsed"/>
+                                <ComboBox x:Name="ModelSelector" MinWidth="120" MaxWidth="220"
+                                          Margin="4,0,0,0" Visibility="Collapsed"
+                                          DropDownOpened="ModelSelector_OnDropDownOpened"
+                                          SelectionChanged="ModelSelector_OnSelectionChanged"/>
                                 <ItemsControl x:Name="CapabilityBar">
                                     <ItemsControl.ItemsPanel>
                                         <ItemsPanelTemplate>
@@ -186,6 +144,14 @@
                     </Grid>
                 </Border>
             </Grid>
+
+            <!-- Offscreen WebView2 host — always visible with real dimensions (1024×768)
+                 so CDP input events are processed reliably even when the drawer is closed.
+                 Positioned at -2000px left to keep it out of view. -->
+            <Grid x:Name="WebView2Host" Width="1024" Height="768"
+                  HorizontalAlignment="Left" VerticalAlignment="Top"
+                  Margin="-2000,0,0,0" IsHitTestVisible="False"
+                  Visibility="Visible"/>
 
             <GridSplitter Grid.Column="2" Width="6" HorizontalAlignment="Stretch"
                           Background="{DynamicResource BorderBrush}"/>

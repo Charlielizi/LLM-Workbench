@@ -10,8 +10,18 @@ import {
   providerEventSchema,
   type ProviderEvent,
   type ProviderId,
+  type OutgoingMessage,
+  PROVIDER_MODES,
+  type ProviderMode,
   type ProviderState,
 } from "@aihub/core";
+import {
+  attachmentUploadModeForKind,
+  isTransientModeSelection,
+  resolveFileInputSelectors,
+  type AttachmentUploadMode,
+  type ProviderModeCommandState,
+} from "./provider-runtime-helpers";
 
 interface RuntimeOptions {
   mainWindow: BrowserWindow;
@@ -166,18 +176,87 @@ export class ProviderRuntime {
     return completion;
   }
 
-  async send(text: string): Promise<void> {
+  async send(input: string | OutgoingMessage): Promise<void> {
     await this.initialize();
     this.ensureHealthy();
     if (this.generating) {
       throw new Error(`${this.id} is already generating a response.`);
     }
-    await this.command("send-message", { text });
+    const request = typeof input === "string"
+      ? { conversationId: "", text: input }
+      : input;
+    if (request.model) {
+      await this.configureModel(request.model);
+    }
+    const requestedModes = new Set(request.modes ?? []);
+    for (const mode of PROVIDER_MODES) {
+      await this.configureMode(mode, requestedModes.has(mode));
+    }
+    if (request.attachments?.length) {
+      const groups = new Map<AttachmentUploadMode, typeof request.attachments>();
+      for (const attachment of request.attachments) {
+        const uploadMode = attachmentUploadModeForKind(attachment.kind);
+        const current = groups.get(uploadMode) ?? [];
+        groups.set(uploadMode, [...current, attachment]);
+      }
+      for (const [uploadMode, attachments] of groups) {
+        let preparation = await this.command<{
+          ready: boolean;
+          x?: number;
+          y?: number;
+        }>("prepare-attachments", { attachmentMode: uploadMode });
+        if (
+          !preparation.ready &&
+          preparation.x !== undefined &&
+          preparation.y !== undefined
+        ) {
+          await this.dispatchTrustedClick(preparation.x, preparation.y);
+          for (let attempt = 0; attempt < 30; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            preparation = await this.command<{
+              ready: boolean;
+              x?: number;
+              y?: number;
+            }>("prepare-attachments", { attachmentMode: uploadMode });
+            if (preparation.ready) break;
+          }
+        }
+        if (!preparation.ready) {
+          throw new Error(`${this.id} website attachment control was not found.`);
+        }
+        await this.setFileInputFiles(
+          attachments.map((attachment) => attachment.localPath),
+        );
+        await this.command("wait-attachments", {
+          names: attachments.map((attachment) => attachment.name),
+        });
+      }
+    }
+    await this.command("send-message", {
+      text: request.text,
+      modes: request.modes ?? [],
+      model: request.model,
+    });
   }
 
   async cancel(): Promise<void> {
     if (!this.initialized) return;
     await this.command("cancel-generation");
+  }
+
+  async discoverModels(): Promise<void> {
+    await this.initialize();
+    this.ensureHealthy();
+    const action = await this.command<{
+      available: boolean;
+      selected: boolean;
+      x?: number;
+      y?: number;
+    }>("discover-models");
+    if (!action.available) return;
+    if (action.x !== undefined && action.y !== undefined) {
+      await this.dispatchTrustedClick(action.x, action.y);
+    }
   }
 
   setVisible(visible: boolean): void {
@@ -192,10 +271,19 @@ export class ProviderRuntime {
     }
   }
 
-  layout(): void {
+  layout(drawerWidth?: number): void {
     if (!this.attached) return;
     const [width = 960, height = 640] = this.mainWindow.getContentSize();
-    this.view.setBounds({ x: 0, y: 56, width, height: Math.max(100, height - 56) });
+    const resolvedWidth = Math.min(
+      width,
+      Math.max(320, drawerWidth ?? width),
+    );
+    this.view.setBounds({
+      x: width - resolvedWidth,
+      y: 56,
+      width: resolvedWidth,
+      height: Math.max(100, height - 56),
+    });
   }
 
   isVisible(): boolean {
@@ -236,6 +324,115 @@ export class ProviderRuntime {
         payload,
       });
     });
+  }
+
+  private async setFileInputFiles(paths: string[]): Promise<void> {
+    if (!this.view.webContents.debugger.isAttached()) {
+      this.view.webContents.debugger.attach("1.3");
+    }
+    const document = await this.view.webContents.debugger.sendCommand(
+      "DOM.getDocument",
+      { depth: 0, pierce: true },
+    ) as { root: { nodeId: number } };
+    let nodeId = 0;
+    for (const selector of resolveFileInputSelectors(this.definition)) {
+      const result = await this.view.webContents.debugger.sendCommand(
+        "DOM.querySelector",
+        {
+          nodeId: document.root.nodeId,
+          selector,
+        },
+      ) as { nodeId: number };
+      if (result.nodeId) {
+        nodeId = result.nodeId;
+        break;
+      }
+    }
+    if (!nodeId) {
+      throw new Error(`${this.id} website file input was not found.`);
+    }
+    await this.view.webContents.debugger.sendCommand(
+      "DOM.setFileInputFiles",
+      { nodeId, files: paths },
+    );
+  }
+
+  private async dispatchTrustedClick(x: number, y: number): Promise<void> {
+    if (!this.view.webContents.debugger.isAttached()) {
+      this.view.webContents.debugger.attach("1.3");
+    }
+    for (const type of ["mousePressed", "mouseReleased"]) {
+      await this.view.webContents.debugger.sendCommand(
+        "Input.dispatchMouseEvent",
+        {
+          type,
+          x,
+          y,
+          button: "left",
+          buttons: type === "mousePressed" ? 1 : 0,
+          clickCount: 1,
+        },
+      );
+    }
+  }
+
+  private async configureMode(
+    mode: ProviderMode,
+    enabled: boolean,
+  ): Promise<void> {
+    let state = await this.command<ProviderModeCommandState>(
+      "configure-mode",
+      { mode, enabled },
+    );
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (!state.available) {
+        if (enabled) {
+          throw new Error(`${this.id} mode "${mode}" is not available.`);
+        }
+        return;
+      }
+      if (state.enabled === enabled) return;
+      if (state.x === undefined || state.y === undefined) break;
+      await this.dispatchTrustedClick(state.x, state.y);
+      await new Promise((resolve) => setTimeout(resolve, 180));
+      if (isTransientModeSelection(state, enabled)) {
+        return;
+      }
+      state = await this.command<ProviderModeCommandState>(
+        "configure-mode",
+        { mode, enabled },
+      );
+    }
+    if (!state.available || state.enabled !== enabled) {
+      throw new Error(`${this.id} mode "${mode}" did not change state.`);
+    }
+  }
+
+  private async configureModel(model: string): Promise<void> {
+    type ModelState = {
+      available: boolean;
+      selected: boolean;
+      x?: number;
+      y?: number;
+    };
+    let state = await this.command<ModelState>(
+      "configure-model",
+      { model },
+    );
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (!state.available) {
+        throw new Error(`${this.id} requested model is not available.`);
+      }
+      if (state.selected) return;
+      if (state.x === undefined || state.y === undefined) break;
+      await this.dispatchTrustedClick(state.x, state.y);
+      await new Promise((resolve) => setTimeout(resolve, 180));
+      state = await this.command<ModelState>(
+        "configure-model",
+        { model },
+      );
+    }
+    throw new Error(`${this.id} requested model could not be selected.`);
   }
 
   private handleEvent(event: ProviderEvent): void {

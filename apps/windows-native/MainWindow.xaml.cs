@@ -1,12 +1,12 @@
 using Microsoft.Win32;
 using System.Collections.ObjectModel;
-using System.ComponentModel;
-using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 
 namespace AIHub.Windows;
 
@@ -19,21 +19,25 @@ public partial class MainWindow : Window
     private readonly Dictionary<ProviderId, string> _pendingUserMessages = [];
     private readonly Dictionary<ProviderId, StreamingMessageState> _streamingMessages = [];
     private readonly Dictionary<ProviderId, Task> _providerPreparation = [];
+    private readonly Dictionary<ProviderMode, ToggleButton> _modeButtons = [];
+    private readonly Dictionary<ProviderId, HashSet<ProviderMode>> _selectedModes = [];
+    private readonly HashSet<ProviderId> _modeSelectionsInitialized = [];
+    private readonly Dictionary<ProviderId, string> _selectedModels = [];
+    private bool _updatingModelSelector;
     private readonly ObservableCollection<AttachmentDraft> _attachments = [];
-    private readonly ObservableCollection<MessageDisplay> _messageDisplays = [];
+    private readonly MessageWebView _messageView = new();
     private ConversationRecord? _selectedConversation;
-    private string? _displayedConversationId;
     private ProviderId _currentProvider = ProviderId.Doubao;
     private string? _editParentId;
     private bool _drawerOpen;
     private bool _isGenerating;
-    private bool _autoScroll = true;
     private bool _loadingDraft;
 
     public MainWindow()
     {
         InitializeComponent();
-        MessageList.ItemsSource = _messageDisplays;
+        MessageViewHost.Children.Add(_messageView.View);
+        _messageView.Action += MessageView_OnAction;
         var appData = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "AIHub.Native");
@@ -41,7 +45,7 @@ public partial class MainWindow : Window
         foreach (var definition in ProviderCatalog.All)
         {
             var runtime = new ProviderRuntime(
-                definition, BrowserHost, Path.Combine(appData, "WebView2"));
+                definition, BrowserHost, WebView2Host, Path.Combine(appData, "WebView2"));
             runtime.BridgeEvent += Runtime_OnBridgeEvent;
             _runtimes.Add(definition.Id, runtime);
         }
@@ -65,6 +69,7 @@ public partial class MainWindow : Window
             _streamingMessages.Clear();
             SaveDraft();
             foreach (var runtime in _runtimes.Values) runtime.Dispose();
+            _messageView.Dispose();
             _database.Dispose();
             _theme.Dispose();
         };
@@ -151,6 +156,7 @@ public partial class MainWindow : Window
     {
         SaveDraft();
         _currentProvider = provider;
+        _ = WarmProviderAsync(provider);
         foreach (var definition in ProviderCatalog.All)
         {
             var selected = definition.Id == provider;
@@ -174,8 +180,7 @@ public partial class MainWindow : Window
             ConversationTitle.Text = $"开始与 {definition.Label} 对话";
             ProviderBadgeText.Text = definition.Glyph;
             ProviderBadge.Background = AccentBrush(provider);
-            _displayedConversationId = null;
-            _messageDisplays.Clear();
+            _ = _messageView.ClearAsync(ThemeService.IsLightTheme());
             _loadingDraft = true;
             ComposerBox.Clear();
             _loadingDraft = false;
@@ -220,6 +225,7 @@ public partial class MainWindow : Window
         SaveDraft();
         _selectedConversation = record;
         _currentProvider = record.Provider;
+        _ = WarmProviderAsync(record.Provider);
         _editParentId = null;
         var definition = ProviderCatalog.Get(record.Provider);
         ProviderBadgeText.Text = definition.Glyph;
@@ -231,6 +237,18 @@ public partial class MainWindow : Window
         RefreshMessages();
         RefreshCapabilities();
         RefreshConversationGroups();
+    }
+
+    private async Task WarmProviderAsync(ProviderId provider)
+    {
+        try
+        {
+            await _runtimes[provider].EnsureInitializedAsync();
+        }
+        catch
+        {
+            // Sending and the provider drawer surface actionable errors.
+        }
     }
 
     private void RefreshConversationGroups()
@@ -342,8 +360,7 @@ public partial class MainWindow : Window
     {
         if (_selectedConversation?.Id != id) return;
         _selectedConversation = null;
-        _displayedConversationId = null;
-        _messageDisplays.Clear();
+        _ = _messageView.ClearAsync(ThemeService.IsLightTheme());
         ConversationTitle.Text = "选择或新建会话";
     }
 
@@ -362,41 +379,60 @@ public partial class MainWindow : Window
         if (string.IsNullOrEmpty(text) && _attachments.Count == 0) return;
         var provider = _selectedConversation.Provider;
         var effectiveParent = parentId ?? _editParentId;
+        var selectedModes = SelectedModes(provider);
+        var selectedModel = _selectedModels.GetValueOrDefault(provider) ??
+            _runtimes[provider].Capabilities.Model;
+        var modeSnapshot = JsonSerializer.Serialize(
+            selectedModes.OrderBy(mode => mode).Select(mode => mode.ToString()));
         var message = new MessageRecord(
             Guid.NewGuid().ToString("N"), _selectedConversation.Id, provider,
-            "user", text, "pending", DateTimeOffset.UtcNow, effectiveParent);
+            "user", text, "pending", DateTimeOffset.UtcNow, effectiveParent,
+            ModeSnapshot: modeSnapshot,
+            ModelSnapshot: selectedModel);
         _database.AddMessage(message);
         _pendingUserMessages[provider] = message.Id;
         var attachmentRecords = _attachments.Select(attachment => new AttachmentRecord(
-            Guid.NewGuid().ToString("N"), message.Id, attachment.Name,
+            Guid.NewGuid().ToString("N"), message.Id, attachment.Path, attachment.Name,
             attachment.Kind, attachment.Size, "pending")).ToList();
         foreach (var attachment in attachmentRecords)
             _database.AddAttachment(attachment);
         _editParentId = null;
         ComposerBox.Clear();
+        SetGenerating(true);
         RefreshMessages();
 
         try
         {
             if (_providerPreparation.Remove(provider, out var preparation))
                 await preparation;
-            if (_attachments.Count > 0)
-            {
-                await _runtimes[provider].UploadAttachmentsAsync(
-                    _attachments.Select(item => item.Path).ToArray());
-                foreach (var attachment in attachmentRecords)
-                    _database.UpdateAttachment(attachment.Id, "uploaded");
-            }
+            var request = new ProviderSendRequest(
+                text,
+                attachmentRecords.Select(attachment => new OutgoingAttachment(
+                    attachment.Id,
+                    attachment.LocalPath,
+                    attachment.Name,
+                    attachment.Kind,
+                    attachment.Size)).ToArray(),
+                selectedModes.ToHashSet(),
+                selectedModel);
+            await _runtimes[provider].SendAsync(request);
+            if (_pendingUserMessages.Remove(provider, out var acceptedUserId))
+                _database.UpdateMessage(
+                    acceptedUserId,
+                    FindMessageText(acceptedUserId),
+                    "completed");
+            foreach (var attachment in attachmentRecords)
+                _database.UpdateAttachment(attachment.Id, "uploaded");
             _attachments.Clear();
             RefreshAttachmentPanel();
-            await _runtimes[provider].SendAsync(text);
-            SetGenerating(true);
         }
         catch (Exception exception)
         {
             _database.UpdateMessage(message.Id, text, "failed", exception.Message);
             foreach (var attachment in attachmentRecords)
                 _database.UpdateAttachment(attachment.Id, "failed", exception.Message);
+            _pendingUserMessages.Remove(provider);
+            SetGenerating(false);
             ShowToast(exception.Message);
         }
         RefreshMessages();
@@ -413,16 +449,23 @@ public partial class MainWindow : Window
                 RefreshProviderTabs();
                 return;
             }
-            if (message.Type == "message.started")
+            if (message.Type == "capabilities.changed")
+            {
+                if (_currentProvider == provider) RefreshCapabilities();
+                return;
+            }
+            if (message.Type == "message.dispatched")
             {
                 if (_pendingUserMessages.Remove(provider, out var userId))
                     _database.UpdateMessage(userId, FindMessageText(userId), "completed");
-                if (_selectedConversation?.Provider != provider) return;
-                var id = Guid.NewGuid().ToString("N");
-                _streamingMessages[provider] = new StreamingMessageState(id);
-                _database.AddMessage(new MessageRecord(
-                    id, _selectedConversation.Id, provider, "assistant", "",
-                    "streaming", DateTimeOffset.UtcNow));
+                EnsureStreamingMessage(provider);
+                SetGenerating(true);
+            }
+            else if (message.Type == "message.started")
+            {
+                if (_pendingUserMessages.Remove(provider, out var userId))
+                    _database.UpdateMessage(userId, FindMessageText(userId), "completed");
+                EnsureStreamingMessage(provider);
                 SetGenerating(true);
             }
             else if (message.Type == "message.delta" &&
@@ -438,6 +481,8 @@ public partial class MainWindow : Window
                      _streamingMessages.TryGetValue(provider, out var snapshot))
             {
                 snapshot.RawText = message.Text;
+                if (!string.IsNullOrWhiteSpace(message.Html))
+                    snapshot.Html = message.Html;
                 snapshot.LastChunkAt = DateTime.UtcNow;
                 QueueStreamingRender(provider, snapshot);
             }
@@ -447,7 +492,10 @@ public partial class MainWindow : Window
                 var finalText = TextEncodingRepair.Normalize(
                     message.Text ?? completed.RawText);
                 _database.UpdateMessage(
-                    completed.Id, finalText, "completed");
+                    completed.Id,
+                    finalText,
+                    "completed",
+                    html: message.Html ?? completed.Html);
                 SetGenerating(false);
             }
             else if (message.Type is "generation.failed" or "command.failed" or "adapter.degraded")
@@ -469,6 +517,22 @@ public partial class MainWindow : Window
             }
             RefreshMessages();
         });
+    }
+
+    private void EnsureStreamingMessage(ProviderId provider)
+    {
+        if (_streamingMessages.ContainsKey(provider) ||
+            _selectedConversation?.Provider != provider) return;
+        var id = Guid.NewGuid().ToString("N");
+        _streamingMessages[provider] = new StreamingMessageState(id);
+        _database.AddMessage(new MessageRecord(
+            id,
+            _selectedConversation.Id,
+            provider,
+            "assistant",
+            "",
+            "streaming",
+            DateTimeOffset.UtcNow));
     }
 
     private void QueueStreamingRender(
@@ -506,7 +570,11 @@ public partial class MainWindow : Window
                 if (next is not null && next != current.DisplayText)
                 {
                     current.DisplayText = next;
-                    _database.UpdateMessage(current.Id, next, "streaming");
+                    _database.UpdateMessage(
+                        current.Id,
+                        next,
+                        "streaming",
+                        html: current.Html);
                     RefreshMessages();
                 }
 
@@ -520,52 +588,18 @@ public partial class MainWindow : Window
 
     private void RefreshMessages()
     {
-        if (_selectedConversation is null)
-        {
-            _displayedConversationId = null;
-            _messageDisplays.Clear();
-            return;
-        }
+        if (_selectedConversation is null) return;
         var definition = ProviderCatalog.Get(_selectedConversation.Provider);
-        var userColor = ThemeService.IsLightTheme() ? "#DCE7F8" : "#273248";
-        var assistantColor = ThemeService.IsLightTheme() ? "#FFFFFF" : "#181C26";
-        var messages = _database.GetMessages(_selectedConversation.Id)
-            .Select(message => new MessageDisplay(
-                message.Id,
-                message.Role == "user" ? "你" : definition.Label,
-                TextEncodingRepair.Normalize(message.Text),
-                StatusLabel(message.Status, message.ErrorCode),
-                message.Role == "assistant",
-                message.Role == "user",
-                message.Role == "user" ? HorizontalAlignment.Right : HorizontalAlignment.Left,
-                new SolidColorBrush((Color)ColorConverter.ConvertFromString(
-                    message.Role == "user" ? userColor : assistantColor))))
-            .ToList();
-        if (_displayedConversationId != _selectedConversation.Id)
-        {
-            _displayedConversationId = _selectedConversation.Id;
-            _messageDisplays.Clear();
-        }
-        while (_messageDisplays.Count > messages.Count)
-            _messageDisplays.RemoveAt(_messageDisplays.Count - 1);
-        for (var index = 0; index < messages.Count; index++)
-        {
-            var incoming = messages[index];
-            if (index >= _messageDisplays.Count)
-            {
-                _messageDisplays.Add(incoming);
-            }
-            else if (_messageDisplays[index].Id != incoming.Id)
-            {
-                _messageDisplays[index] = incoming;
-            }
-            else
-            {
-                _messageDisplays[index].Update(incoming.Text, incoming.StatusLabel);
-            }
-        }
-        if (_autoScroll)
-            Dispatcher.BeginInvoke(() => MessageScroller.ScrollToEnd());
+        var isLight = ThemeService.IsLightTheme();
+        var messages = _database.GetMessages(_selectedConversation.Id);
+        var attachments = messages.ToDictionary(
+            message => message.Id,
+            message => _database.GetAttachments(message.Id));
+        _ = _messageView.RenderMessagesAsync(
+            messages,
+            definition,
+            isLight,
+            attachments);
     }
 
     private static string StatusLabel(string status, string? error) => status switch
@@ -579,34 +613,39 @@ public partial class MainWindow : Window
         _ => "",
     };
 
-    private void CopyMessage_OnClick(object sender, RoutedEventArgs e)
+    private void MessageView_OnAction(object? sender, MessageActionEventArgs args)
     {
-        if (sender is Button { Tag: MessageDisplay message })
+        Dispatcher.Invoke(async () =>
         {
-            Clipboard.SetText(message.Text);
-            ShowToast("已复制");
-        }
-    }
+            if (_selectedConversation is null) return;
+            var messages = _database.GetMessages(_selectedConversation.Id).ToList();
+            var target = messages.FirstOrDefault(m => m.Id == args.MessageId);
+            if (target is null) return;
 
-    private async void RetryMessage_OnClick(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Button { Tag: MessageDisplay message } ||
-            _selectedConversation is null) return;
-        var messages = _database.GetMessages(_selectedConversation.Id).ToList();
-        var assistantIndex = messages.FindIndex(item => item.Id == message.Id);
-        var user = messages.Take(Math.Max(0, assistantIndex))
-            .LastOrDefault(item => item.Role == "user");
-        if (user is not null) await SendCurrentMessageAsync(user.Text, user.Id);
-    }
-
-    private void EditMessage_OnClick(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Button { Tag: MessageDisplay message }) return;
-        ComposerBox.Text = message.Text;
-        _editParentId = message.Id;
-        ComposerBox.Focus();
-        ComposerBox.CaretIndex = ComposerBox.Text.Length;
-        ShowToast("已进入编辑重发模式");
+            if (args.Type == "copy")
+            {
+                try
+                {
+                    Clipboard.SetDataObject(target.Text, true);
+                    ShowToast("已复制");
+                }
+                catch { ShowToast("复制失败"); }
+            }
+            else if (args.Type == "retry" && target.Role == "assistant")
+            {
+                var user = messages.Take(messages.IndexOf(target))
+                    .LastOrDefault(m => m.Role == "user");
+                if (user is not null) await SendCurrentMessageAsync(user.Text, user.Id);
+            }
+            else if (args.Type == "edit")
+            {
+                ComposerBox.Text = target.Text;
+                _editParentId = target.Id;
+                ComposerBox.Focus();
+                ComposerBox.CaretIndex = ComposerBox.Text.Length;
+                ShowToast("已进入编辑重发模式");
+            }
+        });
     }
 
     private void StopButton_OnClick(object sender, RoutedEventArgs e)
@@ -643,8 +682,8 @@ public partial class MainWindow : Window
             await _runtimes[provider].ShowAsync();
             foreach (var pair in _runtimes)
                 if (pair.Key != provider) pair.Value.Hide();
-            DrawerTitle.Text = $"{ProviderCatalog.Get(provider).Label} 官网";
             ProviderWebDrawer.Visibility = Visibility.Visible;
+            DrawerTitle.Text = $"{ProviderCatalog.Get(provider).Label} 官网";
             DrawerColumn.Width = new GridLength(Math.Min(520, ActualWidth * .42));
             DrawerSplitterColumn.Width = new GridLength(6);
             _drawerOpen = true;
@@ -701,6 +740,46 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ComposerBox_OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.V ||
+            !Keyboard.Modifiers.HasFlag(ModifierKeys.Control) ||
+            !Clipboard.ContainsImage()) return;
+        var image = Clipboard.GetImage();
+        if (image is null) return;
+        var draftRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "AIHub.Native",
+            "draft-attachments");
+        Directory.CreateDirectory(draftRoot);
+        var path = Path.Combine(
+            draftRoot,
+            $"clipboard-{DateTimeOffset.Now:yyyyMMdd-HHmmss-fff}.png");
+        using (var stream = File.Create(path))
+        {
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(image));
+            encoder.Save(stream);
+        }
+        AddAttachmentPaths([path]);
+        e.Handled = true;
+    }
+
+    private void ComposerBox_OnPreviewDragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop)
+            ? DragDropEffects.Copy
+            : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void ComposerBox_OnDrop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] paths)
+            AddAttachmentPaths(paths);
+        e.Handled = true;
+    }
+
     private void Window_OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Escape && _isGenerating) StopButton_OnClick(sender, e);
@@ -712,17 +791,110 @@ public partial class MainWindow : Window
         }
     }
 
-    private void MessageScroller_OnScrollChanged(object sender, ScrollChangedEventArgs e) =>
-        _autoScroll = MessageScroller.ScrollableHeight - MessageScroller.VerticalOffset < 36;
-
     private void RefreshCapabilities()
     {
         CapabilityBar.Items.Clear();
-        var capabilities = ProviderCatalog.Get(_currentProvider).Capabilities;
-        AttachButton.Visibility = capabilities.Attachments.Count > 0
+        _modeButtons.Clear();
+        var runtimeCapabilities = _runtimes[_currentProvider].Capabilities;
+        var fallback = ProviderCatalog.Get(_currentProvider).Capabilities;
+        var attachments = runtimeCapabilities.Attachments.Count > 0
+            ? runtimeCapabilities.Attachments
+            : fallback.Attachments;
+        AttachButton.Visibility = attachments.Count > 0
             ? Visibility.Visible : Visibility.Collapsed;
-        foreach (var mode in capabilities.Modes)
-            CapabilityBar.Items.Add(new Button { Content = ModeLabel(mode), IsEnabled = false });
+        RefreshModelSelector(runtimeCapabilities);
+        IEnumerable<ProviderModeState> availableModes = runtimeCapabilities.Modes.Count > 0
+            ? runtimeCapabilities.Modes
+            : fallback.Modes.Select(mode =>
+                new ProviderModeState(mode, ModeLabel(mode), false));
+        var availableModeList = availableModes.ToList();
+        var selectedModes = SelectedModes(_currentProvider);
+        selectedModes.RemoveWhere(mode =>
+            availableModeList.All(item => item.Mode != mode));
+        var initializeSelection =
+            _modeSelectionsInitialized.Add(_currentProvider);
+        foreach (var mode in availableModeList)
+        {
+            if (initializeSelection && mode.Enabled) selectedModes.Add(mode.Mode);
+            var toggle = new ToggleButton
+            {
+                Content = mode.Label,
+                Tag = mode.Mode,
+                IsChecked = selectedModes.Contains(mode.Mode),
+                Margin = new Thickness(4, 0, 0, 0),
+            };
+            toggle.Click += ModeToggle_OnClick;
+            _modeButtons[mode.Mode] = toggle;
+            CapabilityBar.Items.Add(toggle);
+        }
+    }
+
+    private void RefreshModelSelector(ProviderCapabilitySnapshot capabilities)
+    {
+        var models = capabilities.Models ?? [];
+        var current = _selectedModels.GetValueOrDefault(_currentProvider) ??
+            capabilities.Model;
+        if (models.Count == 0 && string.IsNullOrWhiteSpace(current))
+        {
+            ModelSelector.Visibility = Visibility.Collapsed;
+            return;
+        }
+        _updatingModelSelector = true;
+        try
+        {
+            ModelSelector.ItemsSource = models.Count > 0
+                ? models
+                : [new ProviderModelState(current!, current!)];
+            ModelSelector.DisplayMemberPath = nameof(ProviderModelState.Label);
+            ModelSelector.SelectedValuePath = nameof(ProviderModelState.Id);
+            ModelSelector.SelectedValue = current;
+            ModelSelector.Visibility = Visibility.Visible;
+        }
+        finally
+        {
+            _updatingModelSelector = false;
+        }
+    }
+
+    private async void ModelSelector_OnDropDownOpened(
+        object sender,
+        EventArgs e)
+    {
+        try
+        {
+            await _runtimes[_currentProvider].DiscoverModelsAsync();
+            RefreshCapabilities();
+        }
+        catch (Exception exception)
+        {
+            ShowToast(exception.Message);
+        }
+    }
+
+    private void ModelSelector_OnSelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_updatingModelSelector ||
+            ModelSelector.SelectedValue is not string model ||
+            string.IsNullOrWhiteSpace(model)) return;
+        _selectedModels[_currentProvider] = model;
+    }
+
+    private void ModeToggle_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ToggleButton { Tag: ProviderMode mode } toggle) return;
+        var selectedModes = SelectedModes(_currentProvider);
+        if (toggle.IsChecked == true) selectedModes.Add(mode);
+        else selectedModes.Remove(mode);
+    }
+
+    private HashSet<ProviderMode> SelectedModes(ProviderId provider)
+    {
+        if (_selectedModes.TryGetValue(provider, out var selected)) return selected;
+        selected = [];
+        _selectedModes[provider] = selected;
+        return selected;
     }
 
     private static string ModeLabel(ProviderMode mode) => mode switch
@@ -737,24 +909,53 @@ public partial class MainWindow : Window
 
     private void AttachButton_OnClick(object sender, RoutedEventArgs e)
     {
-        var capabilities = ProviderCatalog.Get(_currentProvider).Capabilities;
-        if (capabilities.Attachments.Count == 0) return;
+        IReadOnlySet<AttachmentKind> capabilities =
+            _runtimes[_currentProvider].Capabilities.Attachments;
+        if (capabilities.Count == 0)
+            capabilities = ProviderCatalog.Get(_currentProvider).Capabilities.Attachments;
+        if (capabilities.Count == 0) return;
         var dialog = new OpenFileDialog
         {
-            Multiselect = true,
+            Multiselect = _runtimes[_currentProvider].Capabilities.Attachments.Count == 0 ||
+                _runtimes[_currentProvider].Capabilities.MultipleAttachments,
             Filter = "支持的文件|*.png;*.jpg;*.jpeg;*.webp;*.pdf;*.doc;*.docx;*.xls;*.xlsx;*.ppt;*.pptx;*.txt;*.md",
         };
         if (dialog.ShowDialog(this) != true) return;
-        foreach (var path in dialog.FileNames)
+        AddAttachmentPaths(dialog.FileNames);
+    }
+
+    private void AddAttachmentPaths(IEnumerable<string> paths)
+    {
+        IReadOnlySet<AttachmentKind> capabilities =
+            _runtimes[_currentProvider].Capabilities.Attachments;
+        if (capabilities.Count == 0)
+            capabilities = ProviderCatalog.Get(_currentProvider).Capabilities.Attachments;
+        var allowsMultiple =
+            _runtimes[_currentProvider].Capabilities.Attachments.Count == 0 ||
+            _runtimes[_currentProvider].Capabilities.MultipleAttachments;
+        foreach (var path in paths)
         {
+            if (!File.Exists(path)) continue;
             var file = new FileInfo(path);
             var kind = AttachmentType.FromPath(path);
-            if (kind is null || !capabilities.Attachments.Contains(kind.Value))
+            if (kind is null || !capabilities.Contains(kind.Value))
             {
                 ShowToast($"{file.Name} 不受当前模型支持。");
                 continue;
             }
-            _attachments.Add(new AttachmentDraft(path, file.Name, kind.Value, file.Length));
+            if (!allowsMultiple && _attachments.Count > 0)
+            {
+                ShowToast("当前官网只允许选择一个附件。");
+                break;
+            }
+            if (_attachments.Any(item =>
+                    string.Equals(item.Path, path, StringComparison.OrdinalIgnoreCase)))
+                continue;
+            _attachments.Add(new AttachmentDraft(
+                path,
+                file.Name,
+                kind.Value,
+                file.Length));
         }
         RefreshAttachmentPanel();
     }
@@ -812,74 +1013,12 @@ public partial class MainWindow : Window
         new SolidColorBrush((Color)ColorConverter.ConvertFromString(
             ProviderCatalog.Get(provider).AccentColor));
 
-    private sealed class MessageDisplay : INotifyPropertyChanged
-    {
-        private string _text;
-        private string _statusLabel;
-
-        public MessageDisplay(
-            string id,
-            string author,
-            string text,
-            string statusLabel,
-            bool isMarkdown,
-            bool isUser,
-            HorizontalAlignment alignment,
-            Brush background)
-        {
-            Id = id;
-            Author = author;
-            _text = text;
-            _statusLabel = statusLabel;
-            IsMarkdown = isMarkdown;
-            IsUser = isUser;
-            Alignment = alignment;
-            Background = background;
-        }
-
-        public string Id { get; }
-        public string Author { get; }
-        public string Text
-        {
-            get => _text;
-            private set => SetField(ref _text, value);
-        }
-        public string StatusLabel
-        {
-            get => _statusLabel;
-            private set => SetField(ref _statusLabel, value);
-        }
-        public bool IsMarkdown { get; }
-        public bool IsUser { get; }
-        public HorizontalAlignment Alignment { get; }
-        public Brush Background { get; }
-
-        public event PropertyChangedEventHandler? PropertyChanged;
-
-        public void Update(string text, string statusLabel)
-        {
-            Text = text;
-            StatusLabel = statusLabel;
-        }
-
-        private void SetField(
-            ref string field,
-            string value,
-            [CallerMemberName] string? propertyName = null)
-        {
-            if (field == value) return;
-            field = value;
-            PropertyChanged?.Invoke(
-                this,
-                new PropertyChangedEventArgs(propertyName));
-        }
-    }
-
     private sealed class StreamingMessageState(string id)
     {
         public string Id { get; } = id;
         public string RawText { get; set; } = "";
         public string DisplayText { get; set; } = "";
+        public string? Html { get; set; }
         public DateTime LastChunkAt { get; set; } = DateTime.UtcNow;
         public bool RenderLoopRunning { get; set; }
     }

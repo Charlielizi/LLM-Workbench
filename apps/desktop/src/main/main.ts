@@ -43,17 +43,6 @@ async function createWindow(): Promise<void> {
     },
   );
 
-  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    await mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
-  } else {
-    await mainWindow.loadFile(
-      path.join(
-        __dirname,
-        `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`,
-      ),
-    );
-  }
-
   database = new AppDatabase(path.join(app.getPath("userData"), "aihub.sqlite"));
   service = new AppService(mainWindow, database);
   registerIpc(service);
@@ -65,6 +54,18 @@ async function createWindow(): Promise<void> {
     database = undefined;
     mainWindow = undefined;
   });
+
+  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+    await mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+  } else {
+    await mainWindow.loadFile(
+      path.join(
+        __dirname,
+        `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`,
+      ),
+    );
+  }
+
   await service.initialize();
 }
 

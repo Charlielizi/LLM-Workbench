@@ -1,4 +1,12 @@
-import type { ProviderId } from "@aihub/core";
+import type { ProviderId, ProviderMode } from "@aihub/core";
+
+export interface ProviderModeDefinition {
+  mode: ProviderMode;
+  label: string;
+  matchLabels: string[];
+  openerLabels?: string[];
+  disabledLabels?: string[];
+}
 
 export interface ProviderDefinition {
   id: ProviderId;
@@ -10,8 +18,145 @@ export interface ProviderDefinition {
   stopSelectors: string[];
   assistantMessageSelectors: string[];
   loginMarkers: string[];
+  authBlockerSelectors?: string[];
   submitWithEnter?: boolean;
   conversationDocumentSelectors?: string[];
+  fileInputSelectors: string[];
+  attachmentControlSelectors: string[];
+  attachmentControlLabels: string[];
+  modeDefinitions: ProviderModeDefinition[];
+  modelControlSelectors: string[];
+  capabilities: string[];
+}
+
+const commonFileInputs = [
+  "input[type='file'][data-testid*='file']",
+  "input[type='file'][accept]",
+  "input[type='file']",
+];
+
+const commonAttachmentLabels = [
+  "附件",
+  "上传",
+  "添加文件",
+  "添加图片",
+  "图片",
+  "Attach",
+  "Upload",
+  "Add file",
+  "Add photo",
+];
+
+const commonModelControls = [
+  "select[aria-label*='model' i]",
+  "select[name*='model' i]",
+  "button[aria-label*='model' i]",
+  "button[aria-label*='模型']",
+  "[data-testid*='model-switcher']",
+  "[data-testid*='model-selector']",
+  "[class*='model-selector']",
+  "[class*='model-switcher']",
+];
+
+const modes = {
+  reasoning: {
+    mode: "reasoning",
+    label: "深度思考",
+    matchLabels: [
+      "深度思考",
+      "深度推理",
+      "思考",
+      "推理",
+      "Deep Think",
+      "Thinking",
+      "Reasoning",
+    ],
+  },
+  webSearch: {
+    mode: "web-search",
+    label: "联网搜索",
+    matchLabels: ["联网搜索", "联网", "搜索", "Web Search", "Search"],
+  },
+  imageGeneration: {
+    mode: "image-generation",
+    label: "图片生成",
+    matchLabels: [
+      "图片生成",
+      "生成图片",
+      "AI 作图",
+      "Create image",
+      "Image generation",
+    ],
+  },
+  coding: {
+    mode: "coding",
+    label: "编程",
+    matchLabels: ["编程", "代码", "Coding", "Code"],
+  },
+  documents: {
+    mode: "documents",
+    label: "文档",
+    matchLabels: ["文档", "Documents", "Document"],
+  },
+} satisfies Record<string, ProviderModeDefinition>;
+
+const doubaoModes: ProviderModeDefinition[] = [
+  {
+    mode: "reasoning",
+    label: "专家模式",
+    matchLabels: ["专家"],
+    openerLabels: ["快速", "专家"],
+    disabledLabels: ["快速"],
+  },
+  {
+    mode: "image-generation",
+    label: "图像生成",
+    matchLabels: ["图像生成", "图片生成"],
+    openerLabels: ["更多"],
+  },
+  {
+    mode: "coding",
+    label: "编程",
+    matchLabels: ["编程"],
+    openerLabels: ["更多"],
+  },
+  {
+    mode: "documents",
+    label: "PPT 生成",
+    matchLabels: ["PPT 生成"],
+    openerLabels: ["更多"],
+  },
+  {
+    mode: "web-search",
+    label: "深入研究",
+    matchLabels: ["深入研究"],
+    openerLabels: ["更多"],
+  },
+];
+
+function websiteControls(
+  modeDefinitions: ProviderModeDefinition[],
+  options?: {
+    attachmentControlSelectors?: string[];
+    modelControlSelectors?: string[];
+  },
+): Pick<
+  ProviderDefinition,
+  | "fileInputSelectors"
+  | "attachmentControlSelectors"
+  | "attachmentControlLabels"
+  | "modeDefinitions"
+  | "modelControlSelectors"
+> {
+  return {
+    fileInputSelectors: commonFileInputs,
+    attachmentControlSelectors:
+      options?.attachmentControlSelectors ?? [],
+    attachmentControlLabels: commonAttachmentLabels,
+    modeDefinitions,
+    modelControlSelectors:
+      options?.modelControlSelectors ?? commonModelControls,
+  };
 }
 
 export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
@@ -41,6 +186,26 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       "button[data-testid='login-button']",
       "a[href*='/auth/login']",
     ],
+    ...websiteControls([
+      {
+        mode: "web-search",
+        label: "深度研究",
+        matchLabels: ["深度研究", "查找资料"],
+        openerLabels: ["添加文件等"],
+      },
+      {
+        mode: "image-generation",
+        label: "创建图片",
+        matchLabels: ["创建图片", "生成图片"],
+        openerLabels: ["添加文件等"],
+      },
+    ], {
+      attachmentControlSelectors: ["#composer-plus-btn"],
+      modelControlSelectors: [
+        "[data-testid='model-switcher-dropdown-button']",
+      ],
+    }),
+    capabilities: ["联网", "文件", "图像", "代码"],
   },
   claude: {
     id: "claude",
@@ -70,6 +235,17 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       "form[action*='login']",
       "input[type='email']",
     ],
+    ...websiteControls([], {
+      attachmentControlSelectors: [
+        "button[aria-label*='Attach']",
+        "button[aria-label*='Upload']",
+      ],
+      modelControlSelectors: [
+        "button[aria-label*='model' i]",
+        "[data-testid*='model']",
+      ],
+    }),
+    capabilities: ["长文本", "文件", "代码"],
   },
   doubao: {
     id: "doubao",
@@ -120,6 +296,10 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       "main [data-testid*='conversation']",
       "main",
     ],
+    ...websiteControls(doubaoModes, {
+      modelControlSelectors: [],
+    }),
+    capabilities: ["中文", "联网", "图像"],
   },
   kimi: {
     id: "kimi",
@@ -156,6 +336,11 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       "input[type='tel']",
       "button[class*='login']",
     ],
+    ...websiteControls([], {
+      attachmentControlSelectors: [".toolkit-trigger-btn"],
+      modelControlSelectors: [".current-model"],
+    }),
+    capabilities: ["长文本", "联网", "文件"],
   },
   deepseek: {
     id: "deepseek",
@@ -190,6 +375,21 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       "input[placeholder*='手机号']",
       "input[type='tel']",
     ],
+    ...websiteControls([
+      {
+        mode: "reasoning",
+        label: "深度思考",
+        matchLabels: ["深度思考"],
+      },
+      {
+        mode: "web-search",
+        label: "智能搜索",
+        matchLabels: ["智能搜索"],
+      },
+    ], {
+      modelControlSelectors: [],
+    }),
+    capabilities: ["推理", "代码", "中文"],
   },
   hunyuan: {
     id: "hunyuan",
@@ -225,6 +425,21 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       "button[class*='login']",
       "div[class*='login'] input",
     ],
+    authBlockerSelectors: [
+      ".agent-dialogue__tool__login",
+      ".hyc-login__close",
+    ],
+    ...websiteControls([
+      {
+        mode: "reasoning",
+        label: "深度思考",
+        matchLabels: ["深度思考"],
+      },
+    ], {
+      attachmentControlSelectors: ["button[aria-label='工具']"],
+      modelControlSelectors: ["[aria-label='模型选择']"],
+    }),
+    capabilities: ["中文", "联网", "图像"],
   },
   qianwen: {
     id: "qianwen",
@@ -262,8 +477,61 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       "input[type='tel']",
       "iframe[src*='login']",
     ],
+    ...websiteControls([
+      {
+        mode: "reasoning",
+        label: "思考",
+        matchLabels: ["思考"],
+      },
+      {
+        mode: "web-search",
+        label: "研究",
+        matchLabels: ["研究"],
+      },
+      {
+        mode: "image-generation",
+        label: "AI生图",
+        matchLabels: ["AI生图"],
+      },
+      {
+        mode: "coding",
+        label: "代码",
+        matchLabels: ["代码"],
+      },
+      {
+        mode: "documents",
+        label: "PPT创作",
+        matchLabels: ["PPT创作"],
+      },
+    ], {
+      attachmentControlSelectors: [
+        "button[aria-label='添加附件']",
+      ],
+      modelControlSelectors: [
+        "div[type='button'][aria-haspopup='dialog'][data-state]",
+      ],
+    }),
+    capabilities: ["中文", "联网", "文件"],
   },
 };
+
+providerDefinitions.hunyuan.authBlockerSelectors = [
+  ".agent-dialogue__tool__login",
+  ".hyc-login__close",
+];
+providerDefinitions.hunyuan.attachmentControlSelectors = [];
+
+providerDefinitions.qianwen.modeDefinitions =
+  providerDefinitions.qianwen.modeDefinitions.map((definition) =>
+    definition.mode === "image-generation" ||
+      definition.mode === "coding" ||
+      definition.mode === "documents"
+      ? {
+          ...definition,
+          openerLabels: ["\u66f4\u591a"],
+        }
+      : definition
+  );
 
 export function firstMatch(
   document: Document,

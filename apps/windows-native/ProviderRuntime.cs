@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Web.WebView2.Core;
@@ -10,11 +10,16 @@ public sealed class ProviderRuntime : IDisposable
 {
     private const int MaxResponseBytes = 8 * 1024 * 1024;
     private readonly Grid _host;
+    private readonly Grid _backgroundHost;
     private readonly string _profileRoot;
     private readonly string _diagnosticsRoot;
     private bool _initialized;
     private bool _bridgeReady;
+    private bool _movedToHost;
+    private Task? _initializationTask;
     private TaskCompletionSource<bool> _navigationReady =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private TaskCompletionSource _bridgeReadySignal =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private bool _awaitingDoubaoBrief;
     private string? _doubaoMessageId;
@@ -29,27 +34,38 @@ public sealed class ProviderRuntime : IDisposable
     public ProviderDefinition Definition { get; }
     public WebView2 View { get; }
     public bool IsAuthenticated { get; private set; }
+    public ProviderCapabilitySnapshot Capabilities { get; private set; } =
+        ProviderCapabilitySnapshot.Empty;
 
     public event EventHandler<ProviderBridgeEvent>? BridgeEvent;
 
-    public ProviderRuntime(ProviderDefinition definition, Grid host, string profileRoot)
+    public ProviderRuntime(ProviderDefinition definition, Grid host, Grid backgroundHost, string profileRoot)
     {
         Definition = definition;
         _host = host;
+        _backgroundHost = backgroundHost;
         _profileRoot = profileRoot;
         _diagnosticsRoot = Path.Combine(
             Directory.GetParent(profileRoot)?.FullName ?? profileRoot,
             "diagnostics");
         View = new WebView2
         {
-            Visibility = Visibility.Collapsed,
+            Visibility = Visibility.Visible,
             DefaultBackgroundColor = System.Drawing.Color.White,
         };
         Panel.SetZIndex(View, 20);
-        _host.Children.Add(View);
+        // Start in the offscreen background host so CDP events are always available
+        _backgroundHost.Children.Add(View);
+        _movedToHost = false;
     }
 
-    public async Task EnsureInitializedAsync()
+    public Task EnsureInitializedAsync()
+    {
+        _initializationTask ??= InitializeAsync();
+        return _initializationTask;
+    }
+
+    private async Task InitializeAsync()
     {
         if (_initialized) return;
         var profilePath = Path.Combine(_profileRoot, Definition.Id.ToString().ToLowerInvariant());
@@ -78,6 +94,7 @@ public sealed class ProviderRuntime : IDisposable
         View.CoreWebView2.NavigationStarting += (_, args) =>
         {
             _bridgeReady = false;
+            _bridgeReadySignal = new(TaskCreationOptions.RunContinuationsAsynchronously);
             _navigationReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
             if (!IsAllowed(args.Uri))
             {
@@ -104,13 +121,31 @@ public sealed class ProviderRuntime : IDisposable
     public async Task ShowAsync()
     {
         await EnsureInitializedAsync();
+        // Move from offscreen background to visible drawer
+        if (!_movedToHost)
+        {
+            _backgroundHost.Children.Remove(View);
+            _host.Children.Add(View);
+            _movedToHost = true;
+        }
+        // Hide siblings so only this provider is visible in the drawer
         foreach (var sibling in _host.Children.OfType<WebView2>())
             sibling.Visibility = Visibility.Collapsed;
         View.Visibility = Visibility.Visible;
         View.Focus();
     }
 
-    public void Hide() => View.Visibility = Visibility.Collapsed;
+    public void Hide()
+    {
+        // Move back to offscreen background 鈥?keeps CDP events working
+        if (_movedToHost)
+        {
+            _host.Children.Remove(View);
+            _backgroundHost.Children.Add(View);
+            _movedToHost = false;
+        }
+        View.Visibility = Visibility.Visible;
+    }
 
     public async Task StartNewConversationAsync()
     {
@@ -119,14 +154,24 @@ public sealed class ProviderRuntime : IDisposable
         await WaitForNavigationAsync();
     }
 
-    public async Task SendAsync(string text)
+    public Task SendAsync(string text) =>
+        SendAsync(new ProviderSendRequest(
+            text,
+            [],
+            new HashSet<ProviderMode>()));
+
+    public async Task SendAsync(ProviderSendRequest request)
     {
         await EnsureInitializedAsync();
         await WaitForBridgeAsync();
+        await ConfigureModelAsync(request.Model);
+        await ConfigureModesAsync(request.Modes);
+        if (request.Attachments.Count > 0)
+            await UploadAttachmentsAsync(request.Attachments);
         if (Definition.Id == ProviderId.Doubao)
         {
             _awaitingDoubaoBrief = true;
-            _lastSentText = text.Trim();
+            _lastSentText = request.Text.Trim();
             _doubaoMessageId = Guid.NewGuid().ToString("N");
             _pendingDoubaoBrief = null;
             _doubaoStreamText = "";
@@ -138,38 +183,143 @@ public sealed class ProviderRuntime : IDisposable
         View.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new
         {
             type = "send",
-            text,
+            text = request.Text,
+            model = request.Model,
+            modes = request.Modes.Select(mode => (int)mode).ToArray(),
         }));
     }
 
     public async Task UploadAttachmentsAsync(IReadOnlyList<string> paths)
     {
+        var attachments = paths.Select(path =>
+        {
+            var file = new FileInfo(path);
+            return new OutgoingAttachment(
+                Guid.NewGuid().ToString("N"),
+                path,
+                file.Name,
+                AttachmentType.FromPath(path) ?? AttachmentKind.Text,
+                file.Length);
+        }).ToArray();
+        await UploadAttachmentsAsync(attachments);
+    }
+
+    public async Task UploadAttachmentsAsync(
+        IReadOnlyList<OutgoingAttachment> attachments)
+    {
         await EnsureInitializedAsync();
-        if (paths.Count == 0) return;
+        if (attachments.Count == 0) return;
         if (Definition.FileInputSelectors.Length == 0)
             throw new InvalidOperationException($"{Definition.Label} 的附件能力尚未验证。");
 
-        var documentJson = await View.CoreWebView2.CallDevToolsProtocolMethodAsync(
-            "DOM.getDocument", """{"depth":-1,"pierce":true}""");
-        using var document = JsonDocument.Parse(documentJson);
-        var rootNodeId = document.RootElement.GetProperty("root").GetProperty("nodeId").GetInt32();
-        int nodeId = 0;
-        foreach (var selector in Definition.FileInputSelectors)
-        {
-            var query = JsonSerializer.Serialize(new { nodeId = rootNodeId, selector });
-            var resultJson = await View.CoreWebView2.CallDevToolsProtocolMethodAsync(
-                "DOM.querySelector", query);
-            using var result = JsonDocument.Parse(resultJson);
-            nodeId = result.RootElement.GetProperty("nodeId").GetInt32();
-            if (nodeId != 0) break;
-        }
-        if (nodeId == 0)
+        var unsupported = attachments
+            .Where(attachment =>
+                Capabilities.Attachments.Count > 0 &&
+                !Capabilities.Attachments.Contains(attachment.Kind))
+            .Select(attachment => attachment.Name)
+            .ToArray();
+        if (unsupported.Length > 0)
             throw new InvalidOperationException(
-                $"{Definition.Label} 官网的附件入口未找到，该能力已停止执行。");
+                $"{Definition.Label} 当前不接受：{string.Join("、", unsupported)}");
 
-        var parameters = JsonSerializer.Serialize(new { nodeId, files = paths });
-        await View.CoreWebView2.CallDevToolsProtocolMethodAsync(
-            "DOM.setFileInputFiles", parameters);
+        foreach (var group in attachments.GroupBy(AttachmentUploadModeForKind))
+        {
+            var attachmentMode = group.Key;
+            var batch = group.ToArray();
+            var preparationExpression =
+                $"window.__aihubPrepareAttachmentInput?.({JsonSerializer.Serialize(attachmentMode)}) ?? false";
+            if (!await EvaluateBooleanAsync(preparationExpression))
+                throw new InvalidOperationException(
+                    $"{Definition.Label} 官网的附件入口未找到。");
+
+            var documentJson = await View.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                "DOM.getDocument", """{"depth":0,"pierce":true}""");
+            using var document = JsonDocument.Parse(documentJson);
+            var rootNodeId = document.RootElement.GetProperty("root").GetProperty("nodeId").GetInt32();
+            var nodeId = 0;
+            foreach (var selector in new[]
+                     {
+                         "input[data-aihub-file-input='true']",
+                     }.Concat(Definition.FileInputSelectors))
+            {
+                var query = JsonSerializer.Serialize(new { nodeId = rootNodeId, selector });
+                var resultJson = await View.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                    "DOM.querySelector", query);
+                using var result = JsonDocument.Parse(resultJson);
+                nodeId = result.RootElement.GetProperty("nodeId").GetInt32();
+                if (nodeId != 0) break;
+            }
+            if (nodeId == 0)
+                throw new InvalidOperationException(
+                    $"{Definition.Label} 官网的附件入口未找到，该能力已停止执行。");
+
+            var parameters = JsonSerializer.Serialize(new
+            {
+                nodeId,
+                files = batch.Select(attachment => attachment.Path).ToArray(),
+            });
+            await View.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                "DOM.setFileInputFiles", parameters);
+            var names = JsonSerializer.Serialize(
+                batch.Select(attachment => attachment.Name).ToArray());
+            await EvaluateBooleanAsync(
+                $"window.__aihubWaitForAttachments?.({names}) ?? true");
+        }
+    }
+
+    private static string AttachmentUploadModeForKind(OutgoingAttachment attachment) =>
+        attachment.Kind == AttachmentKind.Image ? "image" : "document";
+
+    private async Task ConfigureModesAsync(IReadOnlySet<ProviderMode> modes)
+    {
+        var values = JsonSerializer.Serialize(
+            modes.Select(mode => (int)mode).ToArray());
+        if (!await EvaluateBooleanAsync(
+                $"window.__aihubConfigureModes?.({values}) ?? true"))
+            throw new InvalidOperationException(
+                $"{Definition.Label} 官网模式切换失败。");
+    }
+
+    private async Task ConfigureModelAsync(string? model)
+    {
+        if (string.IsNullOrWhiteSpace(model)) return;
+        var value = JsonSerializer.Serialize(model);
+        if (!await EvaluateBooleanAsync(
+                $"window.__aihubConfigureModel?.({value}) ?? true"))
+            throw new InvalidOperationException(
+                $"{Definition.Label} 官网模型切换失败。");
+    }
+
+    public async Task DiscoverModelsAsync()
+    {
+        await EnsureInitializedAsync();
+        await WaitForBridgeAsync();
+        await EvaluateBooleanAsync(
+            "Promise.resolve(window.__aihubDiscoverModels?.()).then(() => true)");
+    }
+
+    private async Task<bool> EvaluateBooleanAsync(string expression)
+    {
+        var payload = JsonSerializer.Serialize(new
+        {
+            expression = $"Promise.resolve({expression})",
+            awaitPromise = true,
+            returnByValue = true,
+        });
+        var response = await View.CoreWebView2.CallDevToolsProtocolMethodAsync(
+            "Runtime.evaluate",
+            payload);
+        using var document = JsonDocument.Parse(response);
+        if (document.RootElement.TryGetProperty("exceptionDetails", out var exception))
+        {
+            var description = exception.TryGetProperty("text", out var text)
+                ? text.GetString()
+                : "Website transaction failed.";
+            throw new InvalidOperationException(description);
+        }
+        var result = document.RootElement.GetProperty("result");
+        return result.TryGetProperty("value", out var value) &&
+            value.ValueKind == JsonValueKind.True;
     }
 
     public async Task<AdapterAuditReport> RunAuditAsync(
@@ -231,7 +381,8 @@ public sealed class ProviderRuntime : IDisposable
             finalEvent?.Text,
             error,
             candidates,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            Capabilities);
     }
 
     private async Task<IReadOnlyList<AdapterAuditCandidate>> CaptureAuditCandidatesAsync(
@@ -362,12 +513,31 @@ public sealed class ProviderRuntime : IDisposable
             if (message is null) return;
             if (message.Type == "auth.changed" && message.Authenticated is bool authenticated)
                 IsAuthenticated = authenticated;
+            if (message.Type == "capabilities.changed" &&
+                message.Capabilities is not null)
+                Capabilities = message.Capabilities;
             if (message.Type == "bridge.ready")
-                _bridgeReady = true;
-            if (message.Type == "send.activation.required" &&
-                message.X is double x && message.Y is double y)
             {
-                _ = DispatchTrustedClickAsync(x, y);
+                _bridgeReady = true;
+                _bridgeReadySignal.TrySetResult();
+            }
+            if (message.Type == "send.click.required" &&
+                message.X is double clickX && message.Y is double clickY)
+            {
+                _ = DispatchTrustedClickAsync(clickX, clickY);
+                return;
+            }
+            if (message.Type == "ui.click.required" &&
+                message.ActionId is string actionId &&
+                message.X is double uiX &&
+                message.Y is double uiY)
+            {
+                _ = DispatchTrustedUiClickAsync(actionId, uiX, uiY);
+                return;
+            }
+            if (message.Type == "send.enter.required")
+            {
+                _ = DispatchTrustedEnterAsync();
                 return;
             }
             if (Definition.Id == ProviderId.Doubao &&
@@ -559,12 +729,11 @@ public sealed class ProviderRuntime : IDisposable
 
     private async Task WaitForBridgeAsync()
     {
-        for (var attempt = 0; attempt < 40; attempt++)
-        {
-            if (_bridgeReady) return;
-            View.CoreWebView2.PostWebMessageAsJson("""{"type":"probe"}""");
-            await Task.Delay(250);
-        }
+        if (_bridgeReady) return;
+        var completed = await Task.WhenAny(
+            _bridgeReadySignal.Task,
+            Task.Delay(TimeSpan.FromSeconds(10)));
+        if (completed == _bridgeReadySignal.Task) return;
         throw new InvalidOperationException(
             $"{Definition.Label} 网页桥接尚未就绪，请打开官网面板后重试。");
     }
@@ -593,6 +762,66 @@ public sealed class ProviderRuntime : IDisposable
             BridgeEvent?.Invoke(this, new(
                 "command.failed",
                 Reason: $"Trusted send activation failed: {exception.Message}"));
+        }
+    }
+
+    private async Task DispatchTrustedUiClickAsync(
+        string actionId,
+        double x,
+        double y)
+    {
+        var ok = true;
+        try
+        {
+            foreach (var type in new[] { "mousePressed", "mouseReleased" })
+            {
+                var payload = JsonSerializer.Serialize(new
+                {
+                    type,
+                    x,
+                    y,
+                    button = "left",
+                    buttons = type == "mousePressed" ? 1 : 0,
+                    clickCount = 1,
+                });
+                await View.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                    "Input.dispatchMouseEvent",
+                    payload);
+            }
+        }
+        catch
+        {
+            ok = false;
+        }
+        View.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new
+        {
+            type = "ui.click.completed",
+            actionId,
+            ok,
+        }));
+    }
+
+    private async Task DispatchTrustedEnterAsync()
+    {
+        try
+        {
+            // Use CDP Input.dispatchKeyEvent to send a trusted Enter key.
+            // CDP events are isTrusted=true, unlike JS-synthetic KeyboardEvent.
+            // The full sequence (rawKeyDown 鈫?char 鈫?keyUp) ensures compatibility
+            // with frameworks that listen for different event phases.
+            var keyPayload = """{"type":"rawKeyDown","windowsVirtualKeyCode":13,"key":"Enter","code":"Enter","text":"\r","unmodifiedText":"\r","autoRepeat":false}""";
+            var charPayload = """{"type":"char","windowsVirtualKeyCode":13,"key":"Enter","code":"Enter","text":"\r","unmodifiedText":"\r"}""";
+            var upPayload = """{"type":"keyUp","windowsVirtualKeyCode":13,"key":"Enter","code":"Enter"}""";
+
+            await View.CoreWebView2.CallDevToolsProtocolMethodAsync("Input.dispatchKeyEvent", keyPayload);
+            await View.CoreWebView2.CallDevToolsProtocolMethodAsync("Input.dispatchKeyEvent", charPayload);
+            await View.CoreWebView2.CallDevToolsProtocolMethodAsync("Input.dispatchKeyEvent", upPayload);
+        }
+        catch (Exception exception)
+        {
+            BridgeEvent?.Invoke(this, new(
+                "command.failed",
+                Reason: $"Trusted Enter key failed: {exception.Message}"));
         }
     }
 

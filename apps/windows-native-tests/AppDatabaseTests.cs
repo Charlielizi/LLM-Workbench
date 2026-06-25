@@ -49,7 +49,8 @@ public sealed class AppDatabaseTests
                 "message", conversation.Id, ProviderId.Doubao, "user",
                 "请读取附件", "completed", DateTimeOffset.UtcNow));
             database.AddAttachment(new AttachmentRecord(
-                "attachment", "message", "report.pdf", AttachmentKind.Pdf,
+                "attachment", "message", @"C:\docs\report.pdf",
+                "report.pdf", AttachmentKind.Pdf,
                 2048, "pending"));
             database.UpdateAttachment("attachment", "uploaded");
 
@@ -59,6 +60,72 @@ public sealed class AppDatabaseTests
             Assert.Equal(
                 "uploaded",
                 Assert.Single(database.GetAttachments("message")).Status);
+            Assert.Equal(
+                @"C:\docs\report.pdf",
+                Assert.Single(database.GetAttachments("message")).LocalPath);
+        }
+        finally
+        {
+            File.Delete(path);
+            File.Delete(path + "-wal");
+            File.Delete(path + "-shm");
+        }
+    }
+
+    [Fact]
+    public void PersistsProviderHtmlForAssistantMessages()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aihub-{Guid.NewGuid():N}.sqlite");
+        try
+        {
+            using var database = new AppDatabase(path);
+            var conversation = database.CreateConversation(ProviderId.Doubao);
+            database.AddMessage(new MessageRecord(
+                "assistant", conversation.Id, ProviderId.Doubao, "assistant",
+                "答案", "streaming", DateTimeOffset.UtcNow));
+
+            database.UpdateMessage(
+                "assistant",
+                "答案",
+                "completed",
+                html: "<p><strong>答案</strong></p>");
+
+            Assert.Equal(
+                "<p><strong>答案</strong></p>",
+                Assert.Single(database.GetMessages(conversation.Id)).Html);
+        }
+        finally
+        {
+            File.Delete(path);
+            File.Delete(path + "-wal");
+            File.Delete(path + "-shm");
+        }
+    }
+
+    [Fact]
+    public void PersistsSendConfigurationSnapshot()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"aihub-{Guid.NewGuid():N}.sqlite");
+        try
+        {
+            using var database = new AppDatabase(path);
+            var conversation = database.CreateConversation(ProviderId.Doubao);
+            database.AddMessage(new MessageRecord(
+                "configured",
+                conversation.Id,
+                ProviderId.Doubao,
+                "user",
+                "请分析附件",
+                "completed",
+                DateTimeOffset.UtcNow,
+                ModeSnapshot: """["Reasoning","WebSearch"]""",
+                ModelSnapshot: "model-x"));
+
+            var restored = Assert.Single(database.GetMessages(conversation.Id));
+            Assert.Equal(
+                """["Reasoning","WebSearch"]""",
+                restored.ModeSnapshot);
+            Assert.Equal("model-x", restored.ModelSnapshot);
         }
         finally
         {

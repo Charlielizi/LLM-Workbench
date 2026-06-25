@@ -12,6 +12,9 @@ describe("transfer document", () => {
       title: "Test",
       provider: "chatgpt",
       hidden: false,
+      pinned: false,
+      documentIds: [],
+      tagIds: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       messages: Array.from({ length: 7 }, (_, index) => ({

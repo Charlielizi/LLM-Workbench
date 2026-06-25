@@ -1,10 +1,16 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Media.Imaging;
 using Markdig;
+using Markdig.Extensions.Tables;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
 
@@ -15,8 +21,14 @@ public sealed class MarkdownViewer : FlowDocumentScrollViewer
     private static readonly FontFamily BodyFont =
         new("Segoe UI Variable Text, Microsoft YaHei UI, Segoe UI");
 
+    private static readonly HttpClient Http = new();
+    private static readonly ConcurrentDictionary<string, BitmapImage> ImageCache = new();
+
     private static readonly MarkdownPipeline Pipeline =
-        new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
+        new MarkdownPipelineBuilder()
+            .UseAdvancedExtensions()
+            .UseMathematics()
+            .Build();
 
     public static readonly DependencyProperty MarkdownProperty =
         DependencyProperty.Register(
@@ -120,6 +132,9 @@ public sealed class MarkdownViewer : FlowDocumentScrollViewer
                 blocks.Add(paragraph);
                 break;
             }
+            case Markdig.Extensions.Mathematics.MathBlock math:
+                blocks.Add(MathDisplayBlock(math.Lines.ToString()));
+                break;
             case FencedCodeBlock fenced:
                 blocks.Add(CodeBlock(fenced.Lines.ToString(), fenced.Info));
                 break;
@@ -170,6 +185,9 @@ public sealed class MarkdownViewer : FlowDocumentScrollViewer
                     Background = new SolidColorBrush(Color.FromRgb(62, 69, 85)),
                 }));
                 break;
+            case Markdig.Extensions.Tables.Table table:
+                blocks.Add(RenderTable(table));
+                break;
             case ContainerBlock container:
                 foreach (var child in container)
                     AppendBlock(blocks, child);
@@ -212,6 +230,28 @@ public sealed class MarkdownViewer : FlowDocumentScrollViewer
         return paragraph;
     }
 
+    private static Paragraph MathDisplayBlock(string latex)
+    {
+        return new Paragraph(new Run(latex.Trim()))
+        {
+            Margin = new Thickness(0, 8, 0, 10),
+            Padding = new Thickness(14, 10, 14, 10),
+            Background = ThemeService.IsLightTheme()
+                ? new SolidColorBrush(Color.FromRgb(247, 243, 252))
+                : new SolidColorBrush(Color.FromRgb(28, 24, 40)),
+            BorderBrush = ThemeService.IsLightTheme()
+                ? new SolidColorBrush(Color.FromRgb(200, 180, 230))
+                : new SolidColorBrush(Color.FromRgb(80, 65, 120)),
+            BorderThickness = new Thickness(1),
+            TextAlignment = TextAlignment.Center,
+            FontFamily = new FontFamily("Cambria Math, Latin Modern Math, STIX Two Math"),
+            FontSize = 17,
+            Foreground = ThemeService.IsLightTheme()
+                ? new SolidColorBrush(Color.FromRgb(80, 40, 140))
+                : new SolidColorBrush(Color.FromRgb(200, 170, 240)),
+        };
+    }
+
     private static void AppendInline(InlineCollection target, ContainerInline? container)
     {
         var current = container?.FirstChild;
@@ -230,6 +270,16 @@ public sealed class MarkdownViewer : FlowDocumentScrollViewer
                         Foreground = new SolidColorBrush(Color.FromRgb(152, 232, 190)),
                     });
                     break;
+                case Markdig.Extensions.Mathematics.MathInline math:
+                    target.Add(new Run(math.Content.ToString())
+                    {
+                        FontFamily = new FontFamily("Cambria Math, Cascadia Mono"),
+                        FontSize = 15,
+                        Foreground = ThemeService.IsLightTheme()
+                            ? new SolidColorBrush(Color.FromRgb(100, 60, 160))
+                            : new SolidColorBrush(Color.FromRgb(190, 160, 230)),
+                    });
+                    break;
                 case LineBreakInline:
                     target.Add(new LineBreak());
                     break;
@@ -246,6 +296,30 @@ public sealed class MarkdownViewer : FlowDocumentScrollViewer
                     };
                     AppendInline(span.Inlines, emphasis);
                     target.Add(span);
+                    break;
+                }
+                case LinkInline link when link.IsImage:
+                {
+                    if (string.IsNullOrWhiteSpace(link.Url)) break;
+                    var image = new Image
+                    {
+                        MaxWidth = 620,
+                        Margin = new Thickness(0, 6, 0, 6),
+                        Stretch = Stretch.Uniform,
+                        StretchDirection = StretchDirection.DownOnly,
+                    };
+                    var tooltip = link.Title ?? link.Url;
+                    if (!string.IsNullOrWhiteSpace(tooltip))
+                        image.ToolTip = tooltip;
+                    if (ImageCache.TryGetValue(link.Url, out var cached))
+                    {
+                        image.Source = cached;
+                    }
+                    else
+                    {
+                        _ = LoadImageAsync(link.Url, image);
+                    }
+                    target.Add(new InlineUIContainer(image));
                     break;
                 }
                 case LinkInline link when !link.IsImage:
@@ -276,5 +350,100 @@ public sealed class MarkdownViewer : FlowDocumentScrollViewer
             }
             current = current.NextSibling;
         }
+    }
+
+    private static async Task LoadImageAsync(string url, Image image)
+    {
+        try
+        {
+            var bytes = await Http.GetByteArrayAsync(url);
+            var bitmap = new BitmapImage();
+            using (var stream = new MemoryStream(bytes))
+            {
+                bitmap.BeginInit();
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.StreamSource = stream;
+                bitmap.EndInit();
+                bitmap.Freeze();
+            }
+            ImageCache[url] = bitmap;
+            image.Source = bitmap;
+        }
+        catch
+        {
+            // Image load failed silently
+        }
+    }
+
+    private static BlockUIContainer RenderTable(Markdig.Extensions.Tables.Table table)
+    {
+        var grid = new Grid
+        {
+            Margin = new Thickness(0, 6, 0, 10),
+        };
+
+        var rows = table.OfType<Markdig.Extensions.Tables.TableRow>().ToList();
+        if (rows.Count == 0)
+            return new BlockUIContainer(grid);
+
+        var colCount = rows[0].Count;
+        for (var i = 0; i < colCount; i++)
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var isHeader = true;
+        foreach (var row in rows)
+        {
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            var rowIndex = grid.RowDefinitions.Count - 1;
+            for (var ci = 0; ci < Math.Min(row.Count, colCount); ci++)
+            {
+                var cell = (Markdig.Extensions.Tables.TableCell)row[ci];
+                var text = new TextBlock
+                {
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(8, 5, 8, 5),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    FontSize = 14,
+                };
+                if (isHeader)
+                {
+                    text.FontWeight = FontWeights.SemiBold;
+                    text.Background = ThemeService.IsLightTheme()
+                        ? new SolidColorBrush(Color.FromRgb(238, 241, 245))
+                        : new SolidColorBrush(Color.FromRgb(30, 36, 50));
+                }
+                var paragraph = new Paragraph();
+                foreach (var block in cell)
+                    if (block is ParagraphBlock pb)
+                        AppendInline(paragraph.Inlines, pb.Inline);
+                text.Inlines.AddRange(paragraph.Inlines.ToList());
+                Grid.SetRow(text, rowIndex);
+                Grid.SetColumn(text, ci);
+                grid.Children.Add(text);
+            }
+            if (isHeader)
+            {
+                grid.RowDefinitions[^1].MinHeight = 32;
+                isHeader = false;
+            }
+        }
+
+        // Horizontal borders between rows
+        var borderColor = ThemeService.IsLightTheme()
+            ? Color.FromRgb(218, 224, 232)
+            : Color.FromRgb(55, 62, 78);
+        for (var ri = 0; ri < grid.RowDefinitions.Count; ri++)
+        {
+            var border = new Border
+            {
+                BorderBrush = new SolidColorBrush(borderColor),
+                BorderThickness = new Thickness(0, ri == 0 ? 1 : 0, 0, 1),
+            };
+            Grid.SetRow(border, ri);
+            Grid.SetColumnSpan(border, colCount);
+            Panel.SetZIndex(border, -1);
+            grid.Children.Add(border);
+        }
+        return new BlockUIContainer(grid);
     }
 }

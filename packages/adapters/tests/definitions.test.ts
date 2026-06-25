@@ -36,7 +36,54 @@ describe("semantic selector fallbacks", () => {
       expect(definition.composerSelectors.length).toBeGreaterThan(0);
       expect(definition.submitSelectors.length).toBeGreaterThan(0);
       expect(definition.assistantMessageSelectors.length).toBeGreaterThan(0);
+      expect(definition.fileInputSelectors.length).toBeGreaterThan(0);
+      expect(definition.attachmentControlLabels.length).toBeGreaterThan(0);
+      expect(new Set(
+        definition.modeDefinitions.map((mode) => mode.mode),
+      ).size).toBe(definition.modeDefinitions.length);
+      for (const mode of definition.modeDefinitions) {
+        expect(mode.label.length).toBeGreaterThan(0);
+        expect(mode.matchLabels.length).toBeGreaterThan(0);
+      }
     }
+  });
+
+  it("uses provider-specific website modes", () => {
+    expect(
+      providerDefinitions.deepseek.modeDefinitions.map((item) => item.mode),
+    ).toEqual(["reasoning", "web-search"]);
+    expect(
+      providerDefinitions.chatgpt.modeDefinitions.map((item) => item.mode),
+    ).toContain("image-generation");
+    expect(
+      providerDefinitions.kimi.modeDefinitions.map((item) => item.mode),
+    ).toEqual([]);
+    expect(
+      providerDefinitions.doubao.modeDefinitions.find(
+        (item) => item.mode === "reasoning",
+      ),
+    ).toMatchObject({
+      label: "专家模式",
+      matchLabels: ["专家"],
+      openerLabels: ["快速", "专家"],
+      disabledLabels: ["快速"],
+    });
+    expect(
+      providerDefinitions.doubao.modeDefinitions.find(
+        (item) => item.mode === "image-generation",
+      )?.openerLabels,
+    ).toContain("更多");
+    expect(providerDefinitions.chatgpt.attachmentControlSelectors)
+      .toContain("#composer-plus-btn");
+    expect(providerDefinitions.chatgpt.modelControlSelectors)
+      .toContain("[data-testid='model-switcher-dropdown-button']");
+    expect(providerDefinitions.kimi.attachmentControlSelectors)
+      .toContain(".toolkit-trigger-btn");
+    expect(providerDefinitions.kimi.modelControlSelectors)
+      .toContain(".current-model");
+    expect(
+      providerDefinitions.qianwen.modeDefinitions.map((item) => item.label),
+    ).toEqual(["思考", "研究", "AI生图", "代码", "PPT创作"]);
   });
 
   it("prefers a usable composer over stale login elements", () => {
