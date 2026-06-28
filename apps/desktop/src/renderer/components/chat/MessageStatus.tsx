@@ -1,38 +1,54 @@
 import { AlertCircle, Clock3, RotateCcw } from "lucide-react";
-import type { MessageStatus as Status } from "@aihub/core";
+import type { NormalizedMessage } from "@aihub/core";
+import {
+  messageStatusDetail,
+  messageStatusLabel,
+} from "../../utils/message-status";
 
 export function MessageStatus({
-  status,
+  message,
   onRetry,
 }: {
-  status: Status;
+  message: Pick<
+    NormalizedMessage,
+    "status" | "statusPhase" | "statusDetail" | "errorCode"
+  >;
   onRetry: () => Promise<void>;
 }) {
-  if (status === "pending") {
+  const label = messageStatusLabel(message);
+  const detail = messageStatusDetail(message);
+
+  if (message.status === "pending") {
     return (
-      <span className="flex items-center gap-1 font-normal text-[var(--color-warning)]">
+      <span
+        className="inline-flex items-center gap-1 font-normal text-[var(--color-warning)]"
+        title={detail}
+      >
         <Clock3 size={13} />
-        发送中
+        {label ?? "Sending"}
       </span>
     );
   }
-  if (status === "streaming") {
+  if (message.status === "streaming") {
     return (
-      <span className="flex items-center gap-1 font-normal text-[var(--color-accent)]">
+      <span className="inline-flex items-center gap-1 font-normal text-[var(--color-text-secondary)]">
         <i className="size-2 animate-pulse rounded-full bg-current" />
-        生成中
+        {label ?? "Receiving reply"}
       </span>
     );
   }
-  if (status === "failed") {
+  if (message.status === "failed") {
     return (
-      <span className="flex items-center gap-1 font-normal text-[var(--color-danger)]">
+      <span
+        className="inline-flex items-center gap-1 font-normal text-[var(--color-danger)]"
+        title={detail}
+      >
         <AlertCircle size={13} />
-        已中断
+        {label ?? "Failed"}
         <button
           className="ml-1 rounded p-1 hover:bg-[var(--color-danger-bg)]"
           onClick={() => void onRetry()}
-          title="重试"
+          title="Retry"
         >
           <RotateCcw size={12} />
         </button>

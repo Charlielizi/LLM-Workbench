@@ -7,6 +7,7 @@ import {
 } from "electron";
 import { providerDefinitions } from "@aihub/adapters";
 import {
+  messageToText,
   providerEventSchema,
   type ProviderEvent,
   type ProviderId,
@@ -35,6 +36,9 @@ interface PendingCompletion {
   timeout: NodeJS.Timeout;
 }
 
+const TOPBAR_HEIGHT = 84;
+const DETACH_DELAY_MS = 30_000;
+
 export class ProviderRuntime {
   readonly id: ProviderId;
   readonly view: WebContentsView;
@@ -42,10 +46,12 @@ export class ProviderRuntime {
   private readonly mainWindow: BrowserWindow;
   private readonly onEvent;
   private attached = false;
+  private visible = false;
   private degraded = false;
   private generating = false;
   private initialized = false;
   private initializing?: Promise<void>;
+  private detachTimer?: ReturnType<typeof setTimeout>;
   private pendingCompletion?: PendingCompletion;
   private readonly pendingCommands = new Map<
     string,
@@ -130,6 +136,14 @@ export class ProviderRuntime {
     return this.initializing;
   }
 
+  async attach(): Promise<void> {
+    await this.initialize();
+    if (this.attached) return;
+    this.mainWindow.contentView.addChildView(this.view);
+    this.attached = true;
+    this.layout();
+  }
+
   async detectState(): Promise<ProviderState> {
     await this.initialize();
     if (this.degraded) {
@@ -149,6 +163,12 @@ export class ProviderRuntime {
     this.ensureHealthy();
     const url = this.definition.newConversationUrls[0];
     if (!url) throw new Error(`No new-conversation URL is configured for ${this.id}.`);
+    await this.view.webContents.loadURL(url);
+  }
+
+  async navigateToConversation(url: string): Promise<void> {
+    await this.initialize();
+    this.ensureHealthy();
     await this.view.webContents.loadURL(url);
   }
 
@@ -260,37 +280,65 @@ export class ProviderRuntime {
   }
 
   setVisible(visible: boolean): void {
-    if (visible && !this.attached) {
-      this.mainWindow.contentView.addChildView(this.view);
-      this.attached = true;
+    this.visible = visible;
+    if (this.detachTimer) {
+      clearTimeout(this.detachTimer);
+      this.detachTimer = undefined;
+    }
+    if (visible) {
+      if (!this.attached) {
+        this.mainWindow.contentView.addChildView(this.view);
+        this.attached = true;
+      }
       this.layout();
       this.view.webContents.focus();
-    } else if (!visible && this.attached) {
-      this.mainWindow.contentView.removeChildView(this.view);
-      this.attached = false;
+      return;
+    }
+    if (this.attached) {
+      this.layout();
+      this.detachTimer = setTimeout(() => {
+        this.detachTimer = undefined;
+        if (!this.visible && this.attached && !this.mainWindow.isDestroyed()) {
+          this.mainWindow.contentView.removeChildView(this.view);
+          this.attached = false;
+        }
+      }, DETACH_DELAY_MS);
     }
   }
 
   layout(drawerWidth?: number): void {
     if (!this.attached) return;
     const [width = 960, height = 640] = this.mainWindow.getContentSize();
+    if (!this.visible) {
+      this.view.setBounds({
+        x: Math.max(0, width - 1),
+        y: Math.max(0, height - 1),
+        width: 1,
+        height: 1,
+      });
+      return;
+    }
     const resolvedWidth = Math.min(
       width,
       Math.max(320, drawerWidth ?? width),
     );
     this.view.setBounds({
       x: width - resolvedWidth,
-      y: 56,
+      y: TOPBAR_HEIGHT,
       width: resolvedWidth,
-      height: Math.max(100, height - 56),
+      height: Math.max(100, height - TOPBAR_HEIGHT),
     });
   }
 
   isVisible(): boolean {
-    return this.attached;
+    return this.visible;
   }
 
   destroy(): void {
+    if (this.detachTimer) {
+      clearTimeout(this.detachTimer);
+      this.detachTimer = undefined;
+    }
     if (this.pendingCompletion) {
       clearTimeout(this.pendingCompletion.timeout);
       this.pendingCompletion.reject(new Error("Application is closing."));
@@ -300,7 +348,14 @@ export class ProviderRuntime {
       command.reject(new Error("Application is closing."));
     }
     this.pendingCommands.clear();
-    this.view.webContents.close();
+    if (this.attached && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.contentView.removeChildView(this.view);
+      this.attached = false;
+    }
+    this.attached = false;
+    if (!this.view.webContents.isDestroyed()) {
+      this.view.webContents.close();
+    }
   }
 
   private async command<T = void>(
@@ -308,11 +363,14 @@ export class ProviderRuntime {
     payload?: Record<string, unknown>,
   ): Promise<T> {
     const requestId = crypto.randomUUID();
+    const timeoutMs = type === "send-message" || type === "wait-attachments"
+      ? 45_000
+      : 15_000;
     return new Promise<T>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingCommands.delete(requestId);
         reject(new Error(`${this.id} command "${type}" timed out.`));
-      }, 15_000);
+      }, timeoutMs);
       this.pendingCommands.set(requestId, {
         resolve: (value) => resolve(value as T),
         reject,
@@ -360,6 +418,12 @@ export class ProviderRuntime {
   private async dispatchTrustedClick(x: number, y: number): Promise<void> {
     if (!this.view.webContents.debugger.isAttached()) {
       this.view.webContents.debugger.attach("1.3");
+    }
+    const { width, height } = this.view.getBounds();
+    if (x < 0 || x > width || y < 0 || y > height) {
+      throw new Error(
+        `Click coordinates (${x}, ${y}) out of view bounds (${width}x${height}).`,
+      );
     }
     for (const type of ["mousePressed", "mouseReleased"]) {
       await this.view.webContents.debugger.sendCommand(
@@ -444,10 +508,7 @@ export class ProviderRuntime {
       this.generating = true;
     }
     if (event.type === "message.completed" && this.pendingCompletion) {
-      const text = event.message.content
-        .filter((block) => block.type === "text" || block.type === "code")
-        .map((block) => ("text" in block ? block.text : ""))
-        .join("\n");
+      const text = messageToText(event.message);
       clearTimeout(this.pendingCompletion.timeout);
       this.pendingCompletion.resolve(text);
       this.pendingCompletion = undefined;

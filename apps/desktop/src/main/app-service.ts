@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import {
+  messageToText,
   buildKnowledgeContext,
   appSettingsSchema,
   buildCompressionPrompt,
@@ -14,6 +15,7 @@ import {
   type AppSnapshot,
   type AppSettingsPayload,
   type ComparisonSession,
+  type ContentBlock,
   type ConversationFolder,
   type ConversationTag,
   type KnowledgeDocument,
@@ -23,6 +25,7 @@ import {
   type ProviderId,
   type OutgoingAttachment,
   type ProviderMode,
+  type ProviderSendPhase,
   type ProviderSummary,
   type SystemPrompt,
   type TransferPreview,
@@ -34,13 +37,22 @@ import { ProviderRuntime } from "./provider-runtime";
 export class AppService {
   private readonly runtimes: Record<ProviderId, ProviderRuntime>;
   private readonly states = new Map<ProviderId, ProviderSummary>();
+  private shuttingDown = false;
   private readonly activeConversations = new Map<ProviderId, string>();
+  private readonly pendingMessageContexts = new Map<
+    ProviderId,
+    {
+      conversationId: string;
+      userMessageId: string;
+    }
+  >();
   private readonly streamingMessages = new Map<
     ProviderId,
     {
       messageId: string;
       conversationId: string;
       text: string;
+      content: ContentBlock[];
       sequence: number;
       providerHtml?: string;
     }
@@ -346,16 +358,7 @@ export class AppService {
       ...conversation.messages.flatMap((message) => [
         `## ${message.role === "user" ? "User" : "Assistant"} · ${message.createdAt}`,
         "",
-        message.content
-          .map((block) => {
-            if (block.type === "text") return block.text;
-            if (block.type === "code") {
-              return `\`\`\`${block.language ?? ""}\n${block.text}\n\`\`\``;
-            }
-            return "";
-          })
-          .filter(Boolean)
-          .join("\n\n"),
+        messageToText(message),
         "",
       ]),
     ].join("\n");
@@ -518,6 +521,21 @@ export class AppService {
     return conversation;
   }
 
+  async selectConversation(conversationId: string): Promise<void> {
+    const conversation = this.database.getConversation(conversationId);
+    if (!conversation) return;
+    this.activeConversations.set(conversation.provider, conversationId);
+    if (conversation.externalId) {
+      try {
+        await this.runtimes[conversation.provider].navigateToConversation(
+          conversation.externalId,
+        );
+      } catch {
+        // Navigation failed — website stays on current page
+      }
+    }
+  }
+
   async sendMessage(input: {
     provider: ProviderId;
     conversationId: string;
@@ -526,6 +544,7 @@ export class AppService {
     modes?: ProviderMode[];
     model?: string;
   }): Promise<void> {
+    this.throwIfUnavailableForPersistence();
     const conversation = this.database.getConversation(input.conversationId);
     if (!conversation || conversation.provider !== input.provider) {
       throw new Error("Conversation does not belong to the selected provider.");
@@ -542,10 +561,17 @@ export class AppService {
         })),
       ],
       status: "pending" as const,
+      statusPhase: "checking-auth" as const,
     };
+    this.pendingMessageContexts.set(input.provider, {
+      conversationId: input.conversationId,
+      userMessageId: userMessage.id,
+    });
     this.database.addMessage(userMessage);
     this.emitSnapshot();
     try {
+      await this.runtimes[input.provider].attach();
+      this.throwIfUnavailableForPersistence();
       const documents = this.database.getConversationDocuments(
         conversation.id,
       );
@@ -556,24 +582,37 @@ export class AppService {
       const providerText = prompt
         ? wrapWithSystemPrompt(contextualText, prompt.content)
         : contextualText;
-      await this.runtimes[input.provider].send({
-        conversationId: input.conversationId,
-        text: providerText,
-        attachments: input.attachments,
-        modes: input.modes,
-        model: input.model,
-      });
-      this.database.updateMessage(
-        userMessage.id,
-        userMessage.content,
-        "completed",
-      );
-    } catch (error) {
-      this.database.updateMessage(
-        userMessage.id,
-        userMessage.content,
+        await this.runtimes[input.provider].send({
+          conversationId: input.conversationId,
+          text: providerText,
+          attachments: input.attachments,
+          modes: input.modes,
+          model: input.model,
+        });
+        if (this.isUnavailableForPersistence()) return;
+        const persistedUserMessage = this.database.getMessage(userMessage.id);
+        if (persistedUserMessage?.status === "pending") {
+          this.database.updateMessage(
+          userMessage.id,
+          userMessage.content,
+          "completed",
+          undefined,
+          { statusPhase: "completed" },
+        );
+        }
+      } catch (error) {
+        if (this.isUnavailableForPersistence()) {
+          this.pendingMessageContexts.delete(input.provider);
+          throw error;
+        }
+        this.database.updateMessage(
+          userMessage.id,
+          userMessage.content,
         "failed",
+        undefined,
+        this.describeSendFailure(error),
       );
+      this.pendingMessageContexts.delete(input.provider);
       this.emitSnapshot();
       throw error;
     }
@@ -619,6 +658,18 @@ export class AppService {
     Object.values(this.runtimes).forEach((runtime) =>
       runtime.layout(this.providerDrawerWidth),
     );
+  }
+
+  hideProviderByWebContents(webContents: Electron.WebContents): void {
+    for (const [id, runtime] of Object.entries(this.runtimes) as [
+      ProviderId,
+      ProviderRuntime,
+    ][]) {
+      if (runtime.view.webContents === webContents) {
+        void this.setWebsiteVisible(id, false);
+        return;
+      }
+    }
   }
 
   async discoverProviderModels(provider: ProviderId): Promise<void> {
@@ -676,7 +727,11 @@ export class AppService {
           provider: compressor,
           hidden: true,
         });
-        this.activeConversations.set(compressor, preparation.id);
+      this.activeConversations.set(compressor, preparation.id);
+      this.pendingMessageContexts.set(compressor, {
+        conversationId: preparation.id,
+        userMessageId: "",
+      });
         const compressionPrompt = buildCompressionPrompt(input.markdown);
         this.database.addMessage(
           this.message(preparation.id, compressor, "user", compressionPrompt),
@@ -698,6 +753,10 @@ export class AppService {
         provider: input.targetProvider,
       });
       this.activeConversations.set(input.targetProvider, target.id);
+      this.pendingMessageContexts.set(input.targetProvider, {
+        conversationId: target.id,
+        userMessageId: "",
+      });
       this.database.addMessage(
         this.message(
           target.id,
@@ -727,6 +786,7 @@ export class AppService {
   }
 
   destroy(): void {
+    this.shuttingDown = true;
     Object.values(this.runtimes).forEach((runtime) => runtime.destroy());
   }
 
@@ -739,6 +799,7 @@ export class AppService {
   }
 
   private handleProviderEvent(provider: ProviderId, event: ProviderEvent): void {
+    if (this.isUnavailableForPersistence()) return;
     this.database.logAdapterEvent(
       provider,
       event.type,
@@ -760,6 +821,11 @@ export class AppService {
         degraded: true,
         reason: event.reason,
       });
+    } else if (event.type === "conversation.changed" && event.externalId) {
+      const conversationId = this.activeConversations.get(provider);
+      if (conversationId) {
+        this.database.updateExternalId(conversationId, event.externalId);
+      }
     } else {
       this.persistMessageEvent(provider, event);
     }
@@ -769,29 +835,90 @@ export class AppService {
   }
 
   private persistMessageEvent(provider: ProviderId, event: ProviderEvent): void {
-    const conversationId = this.activeConversations.get(provider);
+    if (this.isUnavailableForPersistence()) return;
+    const context = this.pendingMessageContexts.get(provider);
+    const conversationId =
+      context?.conversationId ?? this.activeConversations.get(provider);
     if (!conversationId) return;
 
+    if (event.type === "message.status") {
+      if (!context?.userMessageId) return;
+      const message = this.database.getMessage(context.userMessageId);
+      if (!message || message.status !== "pending") return;
+      this.database.updateMessage(
+        context.userMessageId,
+        message.content,
+        "pending",
+        message.providerHtml,
+        {
+          statusPhase: event.phase,
+          statusDetail: event.detail,
+          errorCode: message.errorCode,
+        },
+      );
+      return;
+    }
+
     if (event.type === "message.started") {
+      if (context?.userMessageId) {
+        const userMessage = this.database.getMessage(context.userMessageId);
+        if (userMessage) {
+          this.database.updateMessage(
+            context.userMessageId,
+            userMessage.content,
+            "completed",
+            userMessage.providerHtml,
+            {
+              statusPhase: "completed",
+              statusDetail: undefined,
+              errorCode: undefined,
+            },
+          );
+        }
+      }
       const messageId = randomUUID();
       this.streamingMessages.set(provider, {
         messageId,
         conversationId,
         text: "",
+        content: [{ type: "text", text: "" }],
         sequence: 0,
       });
+      this.pendingMessageContexts.delete(provider);
       this.database.addMessage({
         ...this.message(conversationId, provider, "assistant", ""),
         id: messageId,
         status: "streaming",
+        statusPhase: "waiting-first-token",
       });
     }
 
     const streaming = this.streamingMessages.get(provider);
+
+    if (event.type === "generation.failed" && !streaming && context?.userMessageId) {
+      const userMessage = this.database.getMessage(context.userMessageId);
+      if (userMessage) {
+        this.database.updateMessage(
+          context.userMessageId,
+          userMessage.content,
+          "failed",
+          userMessage.providerHtml,
+          {
+            statusPhase: event.phase ?? "failed",
+            statusDetail: event.detail,
+            errorCode: event.code,
+          },
+        );
+      }
+      this.pendingMessageContexts.delete(provider);
+      return;
+    }
+
     if (!streaming) return;
 
     if (event.type === "message.delta") {
       streaming.text += event.text;
+      streaming.content = updateStreamingContent(streaming.content, streaming.text);
       streaming.sequence += 1;
       this.database.addFragment(
         streaming.messageId,
@@ -800,38 +927,56 @@ export class AppService {
       );
       this.database.updateMessage(
         streaming.messageId,
-        [{ type: "text", text: streaming.text }],
+        streaming.content,
         "streaming",
         streaming.providerHtml,
+        {
+          statusPhase: "streaming",
+        },
       );
     } else if (event.type === "message.snapshot") {
       streaming.text = event.text || streaming.text;
+      streaming.content = event.content;
       if (event.providerHtml) streaming.providerHtml = event.providerHtml;
       this.database.updateMessage(
         streaming.messageId,
-        [{ type: "text", text: streaming.text }],
+        streaming.content,
         "streaming",
         streaming.providerHtml,
+        {
+          statusPhase: event.phase ?? "streaming",
+          statusDetail: event.detail,
+        },
       );
     } else if (event.type === "message.completed") {
-      const finalText = event.message.content
-        .filter((block) => block.type === "text" || block.type === "code")
-        .map((block) => ("text" in block ? block.text : ""))
-        .join("\n");
+      const finalText = messageToText(event.message);
       this.database.updateMessage(
         streaming.messageId,
-        [{ type: "text", text: finalText || streaming.text }],
+        event.message.content.length > 0
+          ? event.message.content
+          : updateStreamingContent(streaming.content, finalText || streaming.text),
         "completed",
         event.message.providerHtml,
+        {
+          statusPhase: "completed",
+        },
       );
       this.streamingMessages.delete(provider);
     } else if (event.type === "generation.failed") {
-      this.database.updateMessage(
-        streaming.messageId,
-        [{ type: "text", text: streaming.text }],
-        "failed",
-      );
-      this.streamingMessages.delete(provider);
+      if (streaming.text) {
+        this.database.updateMessage(
+          streaming.messageId,
+          updateStreamingContent(streaming.content, streaming.text),
+          "failed",
+          undefined,
+          {
+            statusPhase: event.phase ?? "failed",
+            statusDetail: event.detail,
+            errorCode: event.code,
+          },
+        );
+        this.streamingMessages.delete(provider);
+      }
     }
   }
 
@@ -876,12 +1021,48 @@ export class AppService {
     };
   }
 
+  private describeSendFailure(
+    error: unknown,
+  ): Pick<NormalizedMessage, "statusPhase" | "statusDetail" | "errorCode"> {
+    const detail = error instanceof Error ? error.message : String(error);
+    if (/login|verification|auth/i.test(detail)) {
+      return {
+        statusPhase: "checking-auth",
+        statusDetail: detail,
+        errorCode: "auth_required",
+      };
+    }
+    if (/timed out/i.test(detail)) {
+      return {
+        statusPhase: "submitting",
+        statusDetail: detail,
+        errorCode: "provider_submission_timeout",
+      };
+    }
+    const failed: ProviderSendPhase = "failed";
+    return {
+      statusPhase: failed,
+      statusDetail: detail,
+      errorCode: "provider_send_failed",
+    };
+  }
+
   private requireConversation(conversationId: string): NormalizedConversation {
     const conversation = this.database.getConversation(conversationId);
     if (!conversation) {
       throw new Error("Conversation was not found.");
     }
     return conversation;
+  }
+
+  private isUnavailableForPersistence(): boolean {
+    return this.shuttingDown || this.database.isClosed();
+  }
+
+  private throwIfUnavailableForPersistence(): void {
+    if (this.isUnavailableForPersistence()) {
+      throw new Error("Application is closing.");
+    }
   }
 }
 
@@ -912,4 +1093,12 @@ function mimeTypeForExtension(extension: string): string {
     ".pdf": "application/pdf",
   };
   return types[extension] ?? "application/octet-stream";
+}
+
+function updateStreamingContent(
+  content: ContentBlock[],
+  text: string,
+): ContentBlock[] {
+  const remainder = content.filter((block) => block.type !== "text");
+  return [{ type: "text", text }, ...remainder];
 }

@@ -22,12 +22,36 @@ export const PROVIDER_LABELS: Record<ProviderId, string> = {
 
 export type MessageRole = "user" | "assistant" | "system";
 export type MessageStatus = "pending" | "streaming" | "completed" | "failed";
+export type ProviderSendPhase =
+  | "checking-auth"
+  | "configuring-model"
+  | "configuring-modes"
+  | "preparing-attachments"
+  | "uploading-attachments"
+  | "typing-message"
+  | "submitting"
+  | "waiting-first-token"
+  | "streaming"
+  | "completed"
+  | "failed";
 
 export type ContentBlock =
   | { type: "text"; text: string }
   | { type: "code"; language?: string; text: string }
   | { type: "attachment"; name: string; localPath?: string }
-  | { type: "citation"; title?: string; url: string };
+  | { type: "citation"; title?: string; url: string }
+  | { type: "image"; src: string; alt?: string; title?: string }
+  | {
+      type: "math";
+      tex: string;
+      display: boolean;
+      source: "katex" | "mathjax" | "mathml";
+    }
+  | {
+      type: "html";
+      html: string;
+      kind: "provider-assistant";
+    };
 
 export interface NormalizedMessage {
   id: string;
@@ -36,6 +60,9 @@ export interface NormalizedMessage {
   content: ContentBlock[];
   providerHtml?: string;
   status: MessageStatus;
+  statusPhase?: ProviderSendPhase;
+  statusDetail?: string;
+  errorCode?: string;
   provider: ProviderId;
   createdAt: string;
 }
@@ -189,13 +216,28 @@ export type ProviderEvent =
   | { type: "message.started"; messageId: string }
   | { type: "message.delta"; messageId: string; text: string }
   | {
+      type: "message.status";
+      messageId?: string;
+      phase: ProviderSendPhase;
+      detail?: string;
+    }
+  | {
       type: "message.snapshot";
       messageId: string;
+      content: ContentBlock[];
       text: string;
       providerHtml?: string;
+      phase?: ProviderSendPhase;
+      detail?: string;
     }
   | { type: "message.completed"; message: NormalizedMessage }
-  | { type: "generation.failed"; code: string; recoverable: boolean }
+  | {
+      type: "generation.failed";
+      code: string;
+      recoverable: boolean;
+      phase?: ProviderSendPhase;
+      detail?: string;
+    }
   | {
       type: "capabilities.changed";
       capabilities: ProviderCapabilitySnapshot;

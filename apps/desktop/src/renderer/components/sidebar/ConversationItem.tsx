@@ -1,9 +1,11 @@
 import { useState } from "react";
 import type { MouseEvent } from "react";
-import { Pin } from "lucide-react";
-import { PROVIDER_LABELS } from "@aihub/core";
+import { MoreHorizontal, Pin } from "lucide-react";
 import type { NormalizedConversation } from "@aihub/core";
-import { blockText, useAppStore, useSelectedConversation } from "../../stores/app-store";
+import {
+  useAppStore,
+  useSelectedConversation,
+} from "../../stores/app-store";
 import { ConversationContextMenu } from "./ConversationContextMenu";
 
 export function ConversationItem({
@@ -25,11 +27,11 @@ export function ConversationItem({
   const streaming = useAppStore((state) =>
     state.streamingConversations.has(conversation.id),
   );
-  const allTags = useAppStore((state) => state.tags);
-  const tags = allTags.filter((tag) => conversation.tagIds.includes(tag.id));
+  const active = conversation.id === selected?.id;
 
   function openMenu(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
+    event.stopPropagation();
     selectConversation(conversation.id);
     setMenu({ x: event.clientX, y: event.clientY });
   }
@@ -37,10 +39,10 @@ export function ConversationItem({
   return (
     <>
       <button
-        className={`mb-1 w-full rounded-xl px-3 py-2.5 text-left transition ${
-          conversation.id === selected?.id
-            ? "bg-[var(--color-bg-active)]"
-            : "hover:bg-[var(--color-bg-hover)]"
+        className={`group mb-0.5 w-full rounded-xl px-3 py-1.5 text-left transition ${
+          active
+            ? "bg-[var(--color-bg-elevated)] shadow-[var(--shadow-sm)]"
+            : "hover:bg-[var(--color-bg-soft)]"
         }`}
         onClick={() => {
           if (selectionMode) onToggleSelection?.(conversation.id);
@@ -51,9 +53,9 @@ export function ConversationItem({
         <div className="flex items-center gap-2">
           {selectionMode && (
             <span
-              className={`grid size-4 shrink-0 place-items-center rounded border ${
+              className={`grid size-4 shrink-0 place-items-center rounded border text-[10px] ${
                 selectedInBulk
-                  ? "border-[var(--color-accent)] bg-[var(--color-accent)] text-[#08100c]"
+                  ? "border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-send-text)]"
                   : "border-[var(--color-border-strong)]"
               }`}
             >
@@ -62,35 +64,23 @@ export function ConversationItem({
           )}
           {conversation.pinned && (
             <Pin
-              size={12}
+              size={11}
               fill="currentColor"
-              className="shrink-0 text-[var(--color-accent)]"
+              className="shrink-0 text-[var(--color-text-tertiary)]"
             />
           )}
-          <span className="min-w-0 flex-1 truncate text-sm font-medium">
+          <span className="min-w-0 flex-1 truncate text-[13px] leading-6">
             {conversation.title}
           </span>
           {streaming && (
-            <i className="size-2 animate-pulse rounded-full bg-[var(--color-accent)]" />
+            <i className="size-1.5 shrink-0 animate-pulse rounded-full bg-[var(--color-text-primary)]" />
+          )}
+          {!selectionMode && (
+            <span className="rounded p-0.5 text-[var(--color-text-tertiary)] opacity-0 transition group-hover:opacity-100">
+              <MoreHorizontal size={13} />
+            </span>
           )}
         </div>
-        <div className="mt-1 flex items-center gap-2 text-[11px] text-[var(--color-text-tertiary)]">
-          <span>{PROVIDER_LABELS[conversation.provider]}</span>
-          <span className="truncate">{blockText(conversation)}</span>
-        </div>
-        {tags.length > 0 && (
-          <div className="mt-1.5 flex flex-wrap gap-1">
-            {tags.slice(0, 3).map((tag) => (
-              <span
-                key={tag.id}
-                className="rounded-full px-1.5 py-0.5 text-[9px]"
-                style={{ color: tag.color, background: `${tag.color}20` }}
-              >
-                {tag.name}
-              </span>
-            ))}
-          </div>
-        )}
       </button>
       {menu && (
         <ConversationContextMenu

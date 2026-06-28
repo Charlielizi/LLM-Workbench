@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { ProviderId } from "@aihub/core";
 import type { AppSettingsPayload } from "@aihub/core";
+import { normalizeProviderDrawerWidth } from "../utils/layout";
 
 const STORAGE_KEY = "aihub-settings";
 
@@ -114,8 +115,12 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   },
 
   setProviderDrawerWidth: (width) => {
-    set({ providerDrawerWidth: width });
-    saveSettings({ ...loadSettings(), providerDrawerWidth: width });
+    const normalizedWidth = normalizeProviderDrawerWidth(width);
+    set({ providerDrawerWidth: normalizedWidth });
+    saveSettings({
+      ...loadSettings(),
+      providerDrawerWidth: normalizedWidth,
+    });
   },
 
   setHasCompletedOnboarding: (completed: boolean) => {
@@ -139,6 +144,9 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         const next = {
           ...useSettingsStore.getState(),
           ...remote,
+          providerDrawerWidth: normalizeProviderDrawerWidth(
+            remote.providerDrawerWidth ?? defaults.providerDrawerWidth,
+          ),
           shortcuts: {
             ...DEFAULT_SHORTCUTS,
             ...useSettingsStore.getState().shortcuts,
@@ -162,6 +170,9 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     const next = {
       ...useSettingsStore.getState(),
       ...settings,
+      providerDrawerWidth: normalizeProviderDrawerWidth(
+        settings.providerDrawerWidth ?? defaults.providerDrawerWidth,
+      ),
       shortcuts: {
         ...DEFAULT_SHORTCUTS,
         ...useSettingsStore.getState().shortcuts,

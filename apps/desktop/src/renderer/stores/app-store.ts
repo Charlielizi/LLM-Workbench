@@ -15,6 +15,8 @@ import type {
 } from "@aihub/core";
 import { PROVIDER_IDS, PROVIDER_LABELS } from "@aihub/core";
 import { useToastStore } from "./toast-store";
+import { conversationSnapshotSignature } from "../utils/snapshot-signature";
+import { messageText } from "../utils/message-text";
 
 const emptySnapshot: AppSnapshot = {
   providers: [],
@@ -27,6 +29,8 @@ export interface AppState {
   selectedConversationId: string | undefined;
   busy: boolean;
   error: string | undefined;
+  busyConversations: Set<string>;
+  messageErrors: Map<string, string>;
   transfer: TransferPreview | undefined;
   streamingConversations: Set<string>;
   providerCapabilities: Partial<Record<ProviderId, ProviderCapabilitySnapshot>>;
@@ -141,6 +145,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedConversationId: undefined,
   busy: false,
   error: undefined,
+  busyConversations: new Set(),
+  messageErrors: new Map(),
   transfer: undefined,
   streamingConversations: new Set(),
   providerCapabilities: {},
@@ -156,7 +162,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   folders: [],
   tags: [],
 
-  selectConversation: (id) => set({ selectedConversationId: id }),
+  selectConversation: (id) => {
+    set({ selectedConversationId: id });
+    void window.aihub.selectConversation(id);
+  },
   setBusy: (busy) => set({ busy }),
   setError: (error) => set({ error }),
   setTransfer: (transfer) => set({ transfer }),
@@ -201,8 +210,63 @@ export const useAppStore = create<AppState>((set, get) => ({
     unsubscribeSnapshot?.();
     unsubscribeProviderEvent?.();
     unsubscribeSnapshot = window.aihub.onSnapshot((nextSnapshot) => {
+      const currentSnapshot = get().snapshot;
+      const hasOptimistic = currentSnapshot.conversations.some((c) =>
+        c.messages.some((m) => m.id.startsWith("optimistic-")),
+      );
+
+      // Snapshot deduplication: skip if no optimistic messages and content unchanged
+      if (!hasOptimistic) {
+        const currentSignatures = currentSnapshot.conversations.map(
+          conversationSnapshotSignature,
+        );
+        const nextSignatures = nextSnapshot.conversations.map(
+          conversationSnapshotSignature,
+        );
+        if (
+          currentSignatures.length === nextSignatures.length &&
+          currentSignatures.every((value, index) => value === nextSignatures[index])
+        ) {
+          return;
+        }
+      }
+
+      // Replace optimistic messages with real ones from the snapshot
+      const resolvedSnapshot = hasOptimistic
+        ? {
+            ...nextSnapshot,
+            conversations: nextSnapshot.conversations.map((nextConv) => {
+              const currentConv = currentSnapshot.conversations.find(
+                (c) => c.id === nextConv.id,
+              );
+              if (!currentConv) return nextConv;
+              const optimisticIds = new Set(
+                currentConv.messages
+                  .filter((m) => m.id.startsWith("optimistic-"))
+                  .map((m) => m.id),
+              );
+              if (optimisticIds.size === 0) return nextConv;
+              const realUserMessages = nextConv.messages.filter(
+                (m) =>
+                  m.role === "user" &&
+                  !m.id.startsWith("optimistic-") &&
+                  !currentConv.messages.some((cm) => cm.id === m.id),
+              );
+              if (realUserMessages.length > 0) {
+                return {
+                  ...nextConv,
+                  messages: nextConv.messages.filter(
+                    (m) => !optimisticIds.has(m.id),
+                  ),
+                };
+              }
+              return nextConv;
+            }),
+          }
+        : nextSnapshot;
+
       const streamingConversations = new Set<string>();
-      for (const conversation of nextSnapshot.conversations) {
+      for (const conversation of resolvedSnapshot.conversations) {
         if (
           conversation.messages.some(
             (message) => message.status === "streaming",
@@ -213,15 +277,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       const currentId = get().selectedConversationId;
-      const hasCurrent = nextSnapshot.conversations.some(
+      const hasCurrent = resolvedSnapshot.conversations.some(
         (conversation) => conversation.id === currentId,
       );
       set({
-        snapshot: nextSnapshot,
+        snapshot: resolvedSnapshot,
         streamingConversations,
         selectedConversationId: hasCurrent
           ? currentId
-          : nextSnapshot.conversations[0]?.id,
+          : resolvedSnapshot.conversations[0]?.id,
       });
     });
     unsubscribeProviderEvent = window.aihub.onProviderEvent(
@@ -230,18 +294,18 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (event.type === "auth.changed") {
           useToastStore.getState().addToast(
             event.authenticated
-              ? `${label} 已登录`
-              : `${label} 登录状态已失效`,
+              ? `${label} authenticated`
+              : `${label} authentication expired`,
             event.authenticated ? "success" : "warning",
           );
         } else if (event.type === "adapter.degraded") {
           useToastStore
             .getState()
-            .addToast(`${label} 适配器需要修复：${event.reason}`, "error", 7000);
+            .addToast(`${label} adapter needs recovery: ${event.reason}`, "error", 7000);
         } else if (event.type === "generation.failed") {
           useToastStore
             .getState()
-            .addToast(`${label} 生成失败：${event.code}`, "error");
+            .addToast(`${label} generation failed: ${event.code}`, "error");
         } else if (event.type === "capabilities.changed") {
           set((state) => ({
             providerCapabilities: {
@@ -263,12 +327,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   createConversation: async (provider) => {
-    set({ error: undefined });
     try {
       const conversation = await window.aihub.createConversation(provider);
       set({ selectedConversationId: conversation.id });
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
       await window.aihub.setProviderWebsiteVisible(provider, true);
     }
   },
@@ -282,7 +345,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       ]);
       set({ documents, folders, tags });
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     }
   },
 
@@ -291,7 +354,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const document = await window.aihub.addDocument();
       if (document) set({ documents: await window.aihub.listDocuments() });
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     }
   },
 
@@ -300,7 +363,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await window.aihub.removeDocument(id);
       set({ documents: await window.aihub.listDocuments() });
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     }
   },
 
@@ -311,7 +374,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         documentIds,
       );
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     }
   },
 
@@ -320,7 +383,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await window.aihub.createFolder(name, parentId ?? null);
       set({ folders: await window.aihub.listFolders() });
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     }
   },
 
@@ -329,7 +392,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await window.aihub.renameFolder(id, name);
       set({ folders: await window.aihub.listFolders() });
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     }
   },
 
@@ -338,7 +401,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await window.aihub.deleteFolder(id);
       set({ folders: await window.aihub.listFolders() });
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     }
   },
 
@@ -347,7 +410,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await window.aihub.createTag(name, color);
       set({ tags: await window.aihub.listTags() });
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     }
   },
 
@@ -356,7 +419,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await window.aihub.deleteTag(id);
       set({ tags: await window.aihub.listTags() });
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     }
   },
 
@@ -367,7 +430,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         folderId ?? null,
       );
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     }
   },
 
@@ -375,23 +438,23 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       await window.aihub.setConversationTags(conversationId, tagIds);
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     }
   },
 
   bulkConversationAction: async (input) => {
-    set({ busy: true, error: undefined });
+    set({ busy: true });
     try {
       await window.aihub.bulkConversationAction(input);
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     } finally {
       set({ busy: false });
     }
   },
 
   createComparison: async (providers) => {
-    set({ busy: true, error: undefined });
+    set({ busy: true });
     try {
       const session = await window.aihub.createComparison(providers);
       set({
@@ -399,7 +462,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         comparisonSetupOpen: false,
       });
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     } finally {
       set({ busy: false });
     }
@@ -407,12 +470,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   sendComparison: async (sessionId, text) => {
     if (!text.trim() || get().busy) return false;
-    set({ busy: true, error: undefined });
+    set({ busy: true });
     try {
       await window.aihub.sendComparison(sessionId, text);
       return true;
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
       return false;
     } finally {
       set({ busy: false });
@@ -423,7 +486,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       set({ systemPrompts: await window.aihub.listSystemPrompts() });
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     }
   },
 
@@ -444,7 +507,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ systemPrompts: await window.aihub.listSystemPrompts() });
       return true;
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
       return false;
     }
   },
@@ -454,7 +517,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await window.aihub.deleteSystemPrompt(id);
       set({ systemPrompts: await window.aihub.listSystemPrompts() });
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     }
   },
 
@@ -468,7 +531,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         systemPromptId ?? null,
       );
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     }
   },
 
@@ -484,7 +547,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       const searchResults = await window.aihub.searchConversations(normalized);
       if (version === searchVersion) set({ searchResults });
     } catch (cause) {
-      if (version === searchVersion) set({ error: errorText(cause) });
+      if (version === searchVersion) {
+        useToastStore.getState().addToast(errorText(cause), "error");
+      }
     }
   },
 
@@ -503,7 +568,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         ),
       }));
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     }
   },
 
@@ -518,7 +583,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         ),
       }));
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     }
   },
 
@@ -531,16 +596,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         ),
       }));
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     }
   },
 
   sendMessage: async (input) => {
-    const { snapshot, selectedConversationId, busy } = get();
+    const { snapshot, selectedConversationId, busyConversations } = get();
     if (
       !selectedConversationId ||
       (!input.text.trim() && !input.attachments?.length) ||
-      busy
+      busyConversations.has(selectedConversationId)
     ) return false;
 
     const selected = snapshot.conversations.find(
@@ -548,7 +613,41 @@ export const useAppStore = create<AppState>((set, get) => ({
     );
     if (!selected) return false;
 
-    set({ busy: true, error: undefined });
+    const optimisticId = `optimistic-${Date.now()}`;
+    const optimisticMessage: NormalizedMessage = {
+      id: optimisticId,
+      conversationId: selected.id,
+      role: "user",
+      content: [
+        ...(input.text ? [{ type: "text" as const, text: input.text }] : []),
+        ...(input.attachments ?? []).map((a) => ({
+          type: "attachment" as const,
+          name: a.name,
+          localPath: a.localPath,
+        })),
+      ],
+      status: "pending",
+      provider: selected.provider,
+      createdAt: new Date().toISOString(),
+    };
+
+    set((state) => ({
+      busyConversations: new Set(state.busyConversations).add(selectedConversationId),
+      messageErrors: new Map(state.messageErrors),
+    }));
+    get().messageErrors.delete(selectedConversationId);
+
+    set((state) => ({
+      snapshot: {
+        ...state.snapshot,
+        conversations: state.snapshot.conversations.map((c) =>
+          c.id === selectedConversationId
+            ? { ...c, messages: [...c.messages, optimisticMessage] }
+            : c,
+        ),
+      },
+    }));
+
     try {
       await window.aihub.sendMessage({
         provider: selected.provider,
@@ -557,10 +656,18 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
       return true;
     } catch (cause) {
-      set({ error: errorText(cause) });
+      set((state) => {
+        const next = new Map(state.messageErrors);
+        next.set(selectedConversationId, errorText(cause));
+        return { messageErrors: next };
+      });
       return false;
     } finally {
-      set({ busy: false });
+      set((state) => {
+        const next = new Set(state.busyConversations);
+        next.delete(selectedConversationId);
+        return { busyConversations: next };
+      });
     }
   },
 
@@ -568,13 +675,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       await window.aihub.deleteMessage(conversationId, messageId);
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     }
   },
 
   editAndResendMessage: async (conversationId, messageId, text) => {
-    if (!text.trim() || get().busy) return false;
-    set({ busy: true, error: undefined });
+    if (!text.trim() || get().busyConversations.has(conversationId)) return false;
+    set((state) => ({
+      busyConversations: new Set(state.busyConversations).add(conversationId),
+      messageErrors: new Map(state.messageErrors),
+    }));
+    get().messageErrors.delete(conversationId);
     try {
       await window.aihub.editAndResendMessage({
         conversationId,
@@ -583,10 +694,18 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
       return true;
     } catch (cause) {
-      set({ error: errorText(cause) });
+      set((state) => {
+        const next = new Map(state.messageErrors);
+        next.set(conversationId, errorText(cause));
+        return { messageErrors: next };
+      });
       return false;
     } finally {
-      set({ busy: false });
+      set((state) => {
+        const next = new Set(state.busyConversations);
+        next.delete(conversationId);
+        return { busyConversations: next };
+      });
     }
   },
 
@@ -617,7 +736,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
       set({ transfer });
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     }
   },
 
@@ -625,7 +744,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const { transfer, busy } = get();
     if (!transfer || busy) return;
 
-    set({ busy: true, error: undefined });
+    set({ busy: true });
     try {
       const target = await window.aihub.confirmTransfer({
         sourceConversationId: transfer.sourceConversationId,
@@ -638,7 +757,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         transfer: undefined,
       });
     } catch (cause) {
-      set({ error: errorText(cause) });
+      useToastStore.getState().addToast(errorText(cause), "error");
     } finally {
       set({ busy: false });
     }
@@ -658,20 +777,12 @@ export function useSelectedConversation(): NormalizedConversation | undefined {
 export function blockText(
   conversation: NormalizedConversation,
 ): string {
-  return (
-    conversation.messages
-      .at(-1)
-      ?.content.map((block) => ("text" in block ? block.text : ""))
-      .join(" ")
-      .slice(0, 72) ?? "尚无消息"
-  );
+  const latest = conversation.messages.at(-1);
+  return latest ? messageText(latest).slice(0, 72) : "鐏忔碍妫ゅ☉鍫熶紖";
 }
 
 export function messagePreview(message: NormalizedMessage): string {
-  return message.content
-    .map((block) => ("text" in block ? block.text : ""))
-    .join(" ")
-    .slice(0, 72);
+  return messageText(message).slice(0, 72);
 }
 
 function errorText(cause: unknown): string {

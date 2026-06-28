@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { providerDefinitions } from "../src";
 
 describe("provider overrides", () => {
@@ -10,6 +10,7 @@ describe("provider overrides", () => {
 
   it("does not treat Hunyuan tools as verified attachment controls", () => {
     expect(providerDefinitions.hunyuan.attachmentControlSelectors).toEqual([]);
+    expect(providerDefinitions.hunyuan.attachmentCapabilityConfidence).toBe("unverified");
   });
 
   it("supports Qianwen overflow menu tools", () => {
@@ -21,6 +22,6 @@ describe("provider overrides", () => {
       )
       .flatMap((item) => item.openerLabels ?? []);
 
-    expect(openerLabels).toContain("\u66f4\u591a");
+    expect(openerLabels).toContain("更多");
   });
 });

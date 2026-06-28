@@ -12,7 +12,9 @@
     min-height: 640px;
     overflow: hidden;
     color: var(--color-text-primary);
-    background: var(--color-bg-primary);
+    background:
+      radial-gradient(circle at top, rgb(255 255 255 / 0.04), transparent 24%),
+      linear-gradient(180deg, var(--color-bg-secondary), var(--color-bg-primary));
     font-family: var(--font-sans);
     font-synthesis: none;
   }
@@ -37,8 +39,8 @@
   }
 
   ::selection {
-    color: #08100c;
-    background: var(--color-accent);
+    color: var(--color-send-text);
+    background: var(--color-send-bg);
   }
 
   * {
@@ -48,6 +50,33 @@
 }
 
 @layer components {
+  .panel-glass {
+    background: var(--color-bg-glass);
+    backdrop-filter: blur(var(--backdrop-blur));
+  }
+
+  .panel-glass-strong {
+    background: var(--color-bg-glass-strong);
+    backdrop-filter: blur(var(--backdrop-blur));
+  }
+
+  .subtle-border {
+    border: 1px solid var(--color-border);
+  }
+
+  .interactive-chip {
+    transition:
+      background-color 160ms ease,
+      border-color 160ms ease,
+      color 160ms ease,
+      transform 160ms ease,
+      box-shadow 160ms ease;
+  }
+
+  .interactive-chip:hover {
+    transform: translateY(-1px);
+  }
+
   .message-markdown > div > :first-child {
     margin-top: 0;
   }
@@ -61,7 +90,7 @@
   .message-markdown ol,
   .message-markdown blockquote,
   .message-markdown table {
-    margin: 0.75rem 0;
+    margin: 0.65rem 0;
   }
 
   .message-markdown ul,
@@ -78,7 +107,7 @@
   }
 
   .message-markdown blockquote {
-    border-left: 3px solid var(--color-accent);
+    border-left: 2px solid var(--color-border-strong);
     padding-left: 1rem;
     color: var(--color-text-secondary);
   }
@@ -98,12 +127,12 @@
   }
 
   .message-markdown th {
-    background: var(--color-bg-inset);
+    background: var(--color-bg-soft);
   }
 
   .message-markdown :not(pre) > code {
-    border-radius: 0.35rem;
-    background: var(--color-bg-inset);
+    border-radius: 0.6rem;
+    background: var(--color-bg-soft);
     padding: 0.1rem 0.35rem;
     font-family: var(--font-mono);
     font-size: 0.9em;
@@ -153,7 +182,7 @@
   }
 
   .provider-html blockquote {
-    border-left: 3px solid var(--color-accent);
+    border-left: 2px solid var(--color-border-strong);
     padding-left: 1rem;
   }
 

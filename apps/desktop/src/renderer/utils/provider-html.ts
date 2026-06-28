@@ -93,6 +93,21 @@ function renderFormulaPlaceholders(root: ParentNode): void {
   }
 }
 
+function pruneEmptyLayoutNodes(root: ParentNode): void {
+  const elements = Array.from(root.querySelectorAll<HTMLElement>("div,span,p,section,article"));
+  for (const element of elements.reverse()) {
+    if (element.classList.contains("aihub-math")) continue;
+    if (element.classList.contains("aihub-provider-math")) continue;
+    if (element.childElementCount > 0) continue;
+    const hasMedia = Boolean(
+      element.querySelector("img,video,canvas,svg,table,pre,code,math,mjx-container"),
+    );
+    if (hasMedia) continue;
+    if (element.textContent?.trim()) continue;
+    element.remove();
+  }
+}
+
 export function renderProviderHtml(html: string): string {
   const template = document.createElement("template");
   template.innerHTML = html;
@@ -110,10 +125,7 @@ export function renderProviderHtml(html: string): string {
         continue;
       }
       if (name === "style") {
-        const value = attribute.value;
-        if (/url\s*\(|expression\s*\(|@import/i.test(value)) {
-          element.removeAttribute(attribute.name);
-        }
+        element.removeAttribute(attribute.name);
         continue;
       }
       if (name === "href" || name === "src" || name === "poster") {
@@ -131,6 +143,7 @@ export function renderProviderHtml(html: string): string {
     }
   }
 
+  pruneEmptyLayoutNodes(template.content);
   renderFormulaPlaceholders(template.content);
   return template.innerHTML;
 }

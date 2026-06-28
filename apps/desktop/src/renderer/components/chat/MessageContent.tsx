@@ -1,7 +1,9 @@
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
+import katex from "katex";
 import type { NormalizedMessage } from "@aihub/core";
+import { messageStatusDetail } from "../../utils/message-status";
 import { CodeBlock, MarkdownPre } from "./CodeBlock";
 import { ProviderHtmlContent } from "./ProviderHtmlContent";
 
@@ -10,13 +12,24 @@ export function MessageContent({
 }: {
   message: NormalizedMessage;
 }) {
+  const detail = messageStatusDetail(message);
+  const htmlBlock = message.content.find((block) => block.type === "html");
+  const providerHtml = htmlBlock?.type === "html"
+    ? htmlBlock.html
+    : message.providerHtml;
+
   if (
     message.role === "assistant" &&
-    message.providerHtml
+    providerHtml
   ) {
     return (
       <div className="message-markdown text-[15px] leading-7">
-        <ProviderHtmlContent html={message.providerHtml} />
+        <ProviderHtmlContent html={providerHtml} />
+        {detail && (
+          <p className="mt-3 rounded-2xl border border-[var(--color-border-light)] bg-[var(--color-bg-soft)] px-3 py-2 text-sm text-[var(--color-text-secondary)]">
+            {detail}
+          </p>
+        )}
         {message.status === "streaming" && (
           <span className="ml-1 inline-block h-4 w-0.5 animate-pulse bg-[var(--color-accent)] align-middle" />
         )}
@@ -38,7 +51,7 @@ export function MessageContent({
                   a: ({ children, ...props }) => (
                     <a
                       {...props}
-                      className="text-[var(--color-accent)] underline decoration-transparent underline-offset-4 hover:decoration-current"
+                      className="text-[var(--color-text-primary)] underline decoration-[var(--color-border-strong)] underline-offset-4"
                       onClick={(event) => {
                         event.preventDefault();
                         if (props.href) {
@@ -84,6 +97,37 @@ export function MessageContent({
             </a>
           );
         }
+        if (block.type === "image") {
+          return (
+            <img
+              key={index}
+              src={block.src}
+              alt={block.alt ?? "assistant image"}
+              title={block.title}
+              className="my-4 max-h-[32rem] rounded-2xl border border-[var(--color-border)]"
+            />
+          );
+        }
+        if (block.type === "math") {
+          return (
+            <div
+              key={index}
+              className="my-4 overflow-x-auto"
+              dangerouslySetInnerHTML={{
+                __html: katex.renderToString(block.tex, {
+                  displayMode: block.display,
+                  throwOnError: false,
+                  strict: "ignore",
+                  trust: false,
+                  output: "html",
+                }),
+              }}
+            />
+          );
+        }
+        if (block.type === "html") {
+          return <ProviderHtmlContent key={index} html={block.html} />;
+        }
         return (
           <span
             key={index}
@@ -93,6 +137,11 @@ export function MessageContent({
           </span>
         );
       })}
+      {detail && (
+        <p className="mt-3 rounded-2xl border border-[var(--color-border-light)] bg-[var(--color-bg-soft)] px-3 py-2 text-sm text-[var(--color-text-secondary)]">
+          {detail}
+        </p>
+      )}
     </div>
   );
 }

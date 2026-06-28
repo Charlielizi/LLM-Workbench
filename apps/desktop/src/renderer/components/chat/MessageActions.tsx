@@ -22,40 +22,46 @@ export function MessageActions({
 
   async function copy() {
     await navigator.clipboard.writeText(messageText(message));
-    addToast("消息已复制", "success");
+    addToast("Message copied", "success");
   }
 
   async function remove() {
-    if (!window.confirm("确定删除这条消息吗？")) return;
+    if (!window.confirm("Delete this message?")) return;
     await deleteMessage(message.conversationId, message.id);
   }
 
   return (
-    <div className="absolute -bottom-3 right-3 flex translate-y-1 items-center gap-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-elevated)] p-1 opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100 focus-within:opacity-100">
-      <ActionButton label="复制" icon={Copy} onClick={() => void copy()} />
-      {message.role === "assistant" && canRetry && (
+    <div
+      className={`mt-2 flex items-center gap-1 opacity-0 transition duration-150 group-hover:opacity-100 focus-within:opacity-100 ${
+        message.role === "user" ? "justify-end pr-1" : "justify-start"
+      }`}
+    >
+      <div className="panel-glass flex items-center gap-1 rounded-full border border-[var(--color-border)] p-1 shadow-[var(--shadow-sm)]">
+        <ActionButton label="Copy" icon={Copy} onClick={() => void copy()} />
+        {message.role === "assistant" && canRetry && (
+          <ActionButton
+            label="Retry"
+            icon={RotateCcw}
+            disabled={locked}
+            onClick={onRetry}
+          />
+        )}
+        {message.role === "user" && (
+          <ActionButton
+            label="Edit"
+            icon={Edit3}
+            disabled={locked}
+            onClick={onEdit}
+          />
+        )}
         <ActionButton
-          label="重试"
-          icon={RotateCcw}
+          label="Delete"
+          icon={Trash2}
           disabled={locked}
-          onClick={onRetry}
+          danger
+          onClick={() => void remove()}
         />
-      )}
-      {message.role === "user" && (
-        <ActionButton
-          label="编辑重发"
-          icon={Edit3}
-          disabled={locked}
-          onClick={onEdit}
-        />
-      )}
-      <ActionButton
-        label="删除"
-        icon={Trash2}
-        disabled={locked}
-        danger
-        onClick={() => void remove()}
-      />
+      </div>
     </div>
   );
 }
@@ -75,7 +81,7 @@ function ActionButton({
 }) {
   return (
     <button
-      className={`grid size-7 place-items-center rounded-md ${
+      className={`interactive-chip grid size-8 place-items-center rounded-full ${
         danger
           ? "text-[var(--color-danger)] hover:bg-[var(--color-danger-bg)]"
           : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"

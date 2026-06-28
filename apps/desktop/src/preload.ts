@@ -5,6 +5,8 @@ const api: AIHubApi = {
   getSnapshot: () => ipcRenderer.invoke("app:get-snapshot"),
   createConversation: (provider) =>
     ipcRenderer.invoke("conversation:create", provider),
+  selectConversation: (conversationId) =>
+    ipcRenderer.invoke("conversation:select", conversationId),
   createComparison: (providers) =>
     ipcRenderer.invoke("comparison:create", { providers }),
   sendComparison: (sessionId, text) =>

@@ -3,6 +3,7 @@ import {
   ATTACHMENT_KINDS,
   PROVIDER_IDS,
   PROVIDER_MODES,
+  type ProviderSendPhase,
 } from "./types";
 
 export const providerIdSchema = z.enum(PROVIDER_IDS);
@@ -24,6 +25,23 @@ export const contentBlockSchema = z.discriminatedUnion("type", [
     title: z.string().optional(),
     url: z.string().url(),
   }),
+  z.object({
+    type: z.literal("image"),
+    src: z.string().min(1),
+    alt: z.string().optional(),
+    title: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal("math"),
+    tex: z.string().min(1),
+    display: z.boolean(),
+    source: z.enum(["katex", "mathjax", "mathml"]),
+  }),
+  z.object({
+    type: z.literal("html"),
+    html: z.string().min(1),
+    kind: z.literal("provider-assistant"),
+  }),
 ]);
 
 export const normalizedMessageSchema = z.object({
@@ -33,6 +51,9 @@ export const normalizedMessageSchema = z.object({
   content: z.array(contentBlockSchema),
   providerHtml: z.string().min(1).optional(),
   status: z.enum(["pending", "streaming", "completed", "failed"]),
+  statusPhase: z.custom<ProviderSendPhase>().optional(),
+  statusDetail: z.string().min(1).optional(),
+  errorCode: z.string().min(1).optional(),
   provider: providerIdSchema,
   createdAt: z.string().datetime(),
 });
@@ -62,6 +83,12 @@ export const providerEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("message.started"), messageId: z.string() }),
   z.object({
+    type: z.literal("message.status"),
+    messageId: z.string().optional(),
+    phase: z.custom<ProviderSendPhase>(),
+    detail: z.string().min(1).optional(),
+  }),
+  z.object({
     type: z.literal("message.delta"),
     messageId: z.string(),
     text: z.string(),
@@ -69,8 +96,11 @@ export const providerEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("message.snapshot"),
     messageId: z.string(),
+    content: z.array(contentBlockSchema),
     text: z.string(),
     providerHtml: z.string().min(1).optional(),
+    phase: z.custom<ProviderSendPhase>().optional(),
+    detail: z.string().min(1).optional(),
   }),
   z.object({
     type: z.literal("message.completed"),
@@ -80,6 +110,8 @@ export const providerEventSchema = z.discriminatedUnion("type", [
     type: z.literal("generation.failed"),
     code: z.string(),
     recoverable: z.boolean(),
+    phase: z.custom<ProviderSendPhase>().optional(),
+    detail: z.string().min(1).optional(),
   }),
   z.object({
     type: z.literal("capabilities.changed"),
@@ -281,4 +313,8 @@ export const transferConfirmSchema = z.object({
   targetProvider: providerIdSchema,
   compressionProvider: providerIdSchema.nullable().optional(),
   markdown: z.string().min(1).max(120_000),
+});
+
+export const insertTextSchema = z.object({
+  text: z.string().max(100_000),
 });

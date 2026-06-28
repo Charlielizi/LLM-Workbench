@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { AppShell } from "./components/layout/AppShell";
 import { Sidebar } from "./components/layout/Sidebar";
-import { TopBar } from "./components/layout/TopBar";
+import { MenuBar, TopBar } from "./components/layout/TopBar";
 import { ChatView } from "./components/chat/ChatView";
 import { TransferModal } from "./components/modals/TransferModal";
 import { ToastViewport } from "./components/shared/Toast";
@@ -65,6 +65,7 @@ export function App() {
     <AppShell
       sidebarWidth={sidebarCollapsed ? 72 : sidebarWidth}
       providerDrawerOpen={providerDrawerOpen}
+      menubar={<MenuBar />}
       topbar={<TopBar />}
       sidebar={<Sidebar />}
       workspace={activeComparisonId ? <ComparisonView /> : <ChatView />}

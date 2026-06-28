@@ -1,3 +1,4 @@
+import { messageToText } from "./message-content";
 import type { NormalizedConversation, NormalizedMessage } from "./types";
 
 const REQUIRED_HEADINGS = [
@@ -12,11 +13,7 @@ const REQUIRED_HEADINGS = [
 ] as const;
 
 function messageText(message: NormalizedMessage): string {
-  return message.content
-    .filter((block) => block.type === "text" || block.type === "code")
-    .map((block) => ("text" in block ? block.text : ""))
-    .join("\n")
-    .trim();
+  return messageToText(message).trim();
 }
 
 export function buildTransferDraft(

@@ -148,6 +148,20 @@ describe("trusted IPC schemas", () => {
     const parsed = providerEventSchema.parse({
       type: "message.snapshot",
       messageId: "message",
+      content: [
+        { type: "text", text: "partial answer" },
+        {
+          type: "math",
+          tex: "x^2+y^2",
+          display: false,
+          source: "katex",
+        },
+        {
+          type: "html",
+          kind: "provider-assistant",
+          html: "<div><p>partial answer</p></div>",
+        },
+      ],
       text: "partial answer",
       providerHtml: "<div><p>partial answer</p></div>",
     });
@@ -157,6 +171,10 @@ describe("trusted IPC schemas", () => {
       throw new Error("Expected a snapshot provider event.");
     }
     expect(parsed.providerHtml).toContain("partial answer");
+    expect(parsed.content[1]).toMatchObject({
+      type: "math",
+      tex: "x^2+y^2",
+    });
   });
 
   it("bounds transfer payload size", () => {

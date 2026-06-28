@@ -1,10 +1,12 @@
 import { useRef } from "react";
 import type { PointerEvent, ReactNode } from "react";
 import { useSettingsStore } from "../../stores/settings-store";
+import { normalizeProviderDrawerWidth } from "../../utils/layout";
 
 interface AppShellProps {
   sidebarWidth: number;
   providerDrawerOpen: boolean;
+  menubar: ReactNode;
   topbar: ReactNode;
   sidebar: ReactNode;
   workspace: ReactNode;
@@ -15,6 +17,7 @@ interface AppShellProps {
 export function AppShell({
   sidebarWidth,
   providerDrawerOpen,
+  menubar,
   topbar,
   sidebar,
   workspace,
@@ -39,10 +42,10 @@ export function AppShell({
   function resize(event: PointerEvent<HTMLDivElement>) {
     if (!dragStart.current) return;
     const width = dragStart.current.width - event.clientX + dragStart.current.x;
-    const next = Math.min(
+    const next = normalizeProviderDrawerWidth(Math.min(
       Math.max(320, width),
       Math.max(320, window.innerWidth - sidebarWidth - 360),
-    );
+    ));
     setDrawerWidth(next);
     void window.aihub.setProviderLayout(next);
   }
@@ -54,18 +57,23 @@ export function AppShell({
         gridTemplateColumns: `${sidebarWidth}px minmax(0, 1fr) ${
           providerDrawerOpen ? drawerWidth : 0
         }px`,
-        gridTemplateRows: "var(--topbar-height) minmax(0, 1fr)",
-        backgroundImage:
-          "radial-gradient(circle at 85% 10%, var(--color-accent-glow), transparent 28%)",
+        gridTemplateRows: "var(--menubar-height) var(--topbar-height) minmax(0, 1fr)",
       }}
     >
-      <div className="col-span-3 min-w-0">{topbar}</div>
-      <div className="min-h-0 min-w-0">{sidebar}</div>
+      <div className="col-span-3 min-w-0 border-b border-[var(--color-border-light)]">
+        {menubar}
+      </div>
+      <div className="col-span-3 min-w-0 border-b border-[var(--color-border-light)]">
+        {topbar}
+      </div>
+      <div className="min-h-0 min-w-0 border-r border-[var(--color-border-light)]">
+        {sidebar}
+      </div>
       <div className="relative min-h-0 min-w-0">
         {workspace}
         {providerDrawerOpen && (
           <div
-            className="absolute inset-y-0 right-[-3px] z-20 w-1.5 cursor-col-resize bg-transparent hover:bg-[var(--color-accent)]"
+            className="absolute inset-y-0 right-[-4px] z-20 w-2 cursor-col-resize bg-transparent transition hover:bg-[var(--color-bg-hover)]"
             onPointerDown={startResize}
             onPointerMove={resize}
             onPointerUp={() => {
@@ -74,7 +82,12 @@ export function AppShell({
           />
         )}
       </div>
-      <div className="min-h-0 min-w-0" aria-hidden />
+      <div
+        className={`min-h-0 min-w-0 border-l border-[var(--color-border-light)] transition-opacity ${
+          providerDrawerOpen ? "opacity-100" : "opacity-0"
+        }`}
+        aria-hidden
+      />
       {modals}
       {toasts}
     </div>

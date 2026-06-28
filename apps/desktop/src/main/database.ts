@@ -9,9 +9,11 @@ import type {
   NormalizedMessage,
   KnowledgeDocument,
   ProviderId,
+  ProviderSendPhase,
   ProviderState,
   SystemPrompt,
 } from "@aihub/core";
+import { messageToText } from "@aihub/core";
 
 interface ConversationRow {
   id: string;
@@ -34,6 +36,9 @@ interface MessageRow {
   content_json: string;
   provider_html: string | null;
   status: NormalizedMessage["status"];
+  status_phase: string | null;
+  status_detail: string | null;
+  error_code: string | null;
   provider: ProviderId;
   created_at: string;
 }
@@ -87,6 +92,7 @@ interface TagRow {
 
 export class AppDatabase {
   private readonly db: DatabaseSync;
+  private closed = false;
 
   constructor(path: string) {
     this.db = new DatabaseSync(path);
@@ -122,6 +128,9 @@ export class AppDatabase {
         content_json TEXT NOT NULL,
         provider_html TEXT,
         status TEXT NOT NULL,
+        status_phase TEXT,
+        status_detail TEXT,
+        error_code TEXT,
         provider TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
@@ -212,6 +221,9 @@ export class AppDatabase {
         ON messages(conversation_id, created_at);
     `);
     this.addColumnIfMissing("messages", "provider_html", "TEXT");
+    this.addColumnIfMissing("messages", "status_phase", "TEXT");
+    this.addColumnIfMissing("messages", "status_detail", "TEXT");
+    this.addColumnIfMissing("messages", "error_code", "TEXT");
     this.addColumnIfMissing(
       "conversations",
       "pinned",
@@ -290,8 +302,8 @@ export class AppDatabase {
     this.db
       .prepare(
         `INSERT INTO messages
-          (id, conversation_id, role, content_json, provider_html, status, provider, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, conversation_id, role, content_json, provider_html, status, status_phase, status_detail, error_code, provider, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         message.id,
@@ -300,6 +312,9 @@ export class AppDatabase {
         JSON.stringify(message.content),
         message.providerHtml ?? null,
         message.status,
+        message.statusPhase ?? null,
+        message.statusDetail ?? null,
+        message.errorCode ?? null,
         message.provider,
         message.createdAt,
       );
@@ -312,12 +327,31 @@ export class AppDatabase {
     content: ContentBlock[],
     status: NormalizedMessage["status"],
     providerHtml?: string,
+    metadata?: Pick<
+      NormalizedMessage,
+      "statusPhase" | "statusDetail" | "errorCode"
+    >,
   ): void {
     this.db
-      .prepare("UPDATE messages SET content_json = ?, provider_html = ?, status = ? WHERE id = ?")
-      .run(JSON.stringify(content), providerHtml ?? null, status, messageId);
+      .prepare(
+        `UPDATE messages
+         SET content_json = ?, provider_html = ?, status = ?, status_phase = ?, status_detail = ?, error_code = ?
+         WHERE id = ?`,
+      )
+      .run(
+        JSON.stringify(content),
+        providerHtml ?? null,
+        status,
+        metadata?.statusPhase ?? null,
+        metadata?.statusDetail ?? null,
+        metadata?.errorCode ?? null,
+        messageId,
+      );
     const message = this.getMessage(messageId);
-    if (message) this.upsertMessageSearch(message);
+    if (message) {
+      this.upsertMessageSearch(message);
+      this.touchConversation(message.conversationId);
+    }
   }
 
   getMessage(messageId: string): NormalizedMessage | undefined {
@@ -874,7 +908,13 @@ export class AppDatabase {
   }
 
   close(): void {
+    if (this.closed) return;
+    this.closed = true;
     this.db.close();
+  }
+
+  isClosed(): boolean {
+    return this.closed;
   }
 
   private touchConversation(id: string): void {
@@ -927,6 +967,9 @@ export class AppDatabase {
       content: JSON.parse(row.content_json) as ContentBlock[],
       providerHtml: row.provider_html ?? undefined,
       status: row.status,
+      statusPhase: (row.status_phase as ProviderSendPhase | null) ?? undefined,
+      statusDetail: row.status_detail ?? undefined,
+      errorCode: row.error_code ?? undefined,
       provider: row.provider,
       createdAt: row.created_at,
     };
@@ -1029,9 +1072,7 @@ export class AppDatabase {
   }
 
   private upsertMessageSearch(message: NormalizedMessage): void {
-    const content = message.content
-      .map((block) => ("text" in block ? block.text : ""))
-      .join("\n");
+    const content = messageToText(message);
     this.db
       .prepare("DELETE FROM messages_fts WHERE message_id = ?")
       .run(message.id);

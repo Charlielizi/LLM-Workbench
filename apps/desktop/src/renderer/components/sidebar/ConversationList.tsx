@@ -24,20 +24,22 @@ export function ConversationList({
   if (conversations.length === 0) {
     return (
       <div className="grid flex-1 place-items-center px-6 text-center text-sm leading-6 text-[var(--color-text-tertiary)]">
-        <div>
+        <div className="max-w-52">
           <MessageSquare className="mx-auto mb-3" size={24} />
-          {searching ? "没有找到匹配的会话。" : "登录一个模型，然后创建新对话。"}
+          {searching
+            ? "No matching conversations"
+            : "Sign in to a provider, then start a conversation."}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
+    <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-14">
       {pinned.length > 0 && (
         <section className="mb-3">
-          <h2 className="px-2 py-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-tertiary)]">
-            置顶
+          <h2 className="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--color-text-tertiary)]">
+            Pinned
           </h2>
           {pinned.map((conversation) => (
             <ConversationItem
@@ -52,7 +54,7 @@ export function ConversationList({
       )}
       {groups.map((group) => (
         <section key={group.label} className="mb-3">
-          <h2 className="px-2 py-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-tertiary)]">
+          <h2 className="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--color-text-tertiary)]">
             {group.label}
           </h2>
           {group.conversations.map((conversation) => (

@@ -22,4 +22,14 @@ describe("renderProviderHtml", () => {
     expect(html).toContain("katex");
     expect(html).toContain("x^2+y^2");
   });
+
+  it("removes inline layout styles that can create blank gaps", () => {
+    const html = renderProviderHtml(
+      "<div><p>Line 1</p><div style='height:800px'></div><p>Line 2</p></div>",
+    );
+
+    expect(html).not.toContain("height:800px");
+    expect(html).toContain("Line 1");
+    expect(html).toContain("Line 2");
+  });
 });

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { ComponentType, ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 export function ContextMenu({
   position,
@@ -30,7 +31,7 @@ export function ContextMenu({
   const left = Math.min(position.x, window.innerWidth - 230);
   const top = Math.min(position.y, window.innerHeight - 330);
 
-  return (
+  return createPortal(
     <div
       ref={ref}
       className="fixed z-50 w-56 rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] p-1.5 shadow-2xl"
@@ -38,7 +39,8 @@ export function ContextMenu({
       onPointerDown={(event) => event.stopPropagation()}
     >
       {children}
-    </div>
+    </div>,
+    document.body,
   );
 }
 

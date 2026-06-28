@@ -17,6 +17,7 @@ import type {
 export interface AIHubApi {
   getSnapshot(): Promise<AppSnapshot>;
   createConversation(provider: ProviderId): Promise<NormalizedConversation>;
+  selectConversation(conversationId: string): Promise<void>;
   createComparison(providers: ProviderId[]): Promise<ComparisonSession>;
   sendComparison(sessionId: string, text: string): Promise<void>;
   addDocument(): Promise<KnowledgeDocument | undefined>;

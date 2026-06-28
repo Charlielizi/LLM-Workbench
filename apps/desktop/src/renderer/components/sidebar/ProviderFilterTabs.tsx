@@ -1,3 +1,6 @@
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
+import { createPortal } from "react-dom";
 import { PROVIDER_IDS, PROVIDER_LABELS } from "@aihub/core";
 import type { ProviderId } from "@aihub/core";
 
@@ -10,26 +13,105 @@ export function ProviderFilterTabs({
   value: ProviderFilter;
   onChange: (value: ProviderFilter) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (
+        menuRef.current?.contains(event.target as Node) ||
+        buttonRef.current?.contains(event.target as Node)
+      )
+        return;
+      setOpen(false);
+    };
+    const closeOnKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", closeOnKey);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", closeOnKey);
+    };
+  }, [open]);
+
+  const label = value === "all" ? "All providers" : PROVIDER_LABELS[value];
+
   return (
-    <div className="mb-2 flex gap-1 overflow-x-auto px-3 pb-1">
-      <FilterButton
+    <>
+      <button
+        ref={buttonRef}
+        className="interactive-chip flex w-full items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-soft)] px-3 py-2 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="flex-1 text-left">{label}</span>
+        <ChevronDown size={13} />
+      </button>
+      {open &&
+        createPortal(
+          <FilterDropdown
+            ref={menuRef}
+            value={value}
+            anchor={buttonRef.current}
+            onSelect={(v) => {
+              onChange(v);
+              setOpen(false);
+            }}
+          />,
+          document.body,
+        )}
+    </>
+  );
+}
+
+const FilterDropdown = ({
+  ref,
+  value,
+  anchor,
+  onSelect,
+}: {
+  ref: React.RefObject<HTMLDivElement | null>;
+  value: ProviderFilter;
+  anchor: HTMLButtonElement | null;
+  onSelect: (v: ProviderFilter) => void;
+}) => {
+  const rect = anchor?.getBoundingClientRect();
+  const style: React.CSSProperties = rect
+    ? {
+        position: "fixed",
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width,
+      }
+    : { position: "fixed", top: 200, left: 16 };
+
+  return (
+    <div
+      ref={ref}
+      className="z-50 rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] p-1 shadow-2xl"
+      style={style}
+    >
+      <FilterItem
         active={value === "all"}
-        label="全部"
-        onClick={() => onChange("all")}
+        label="All providers"
+        onClick={() => onSelect("all")}
       />
-      {PROVIDER_IDS.map((provider) => (
-        <FilterButton
-          key={provider}
-          active={value === provider}
-          label={PROVIDER_LABELS[provider]}
-          onClick={() => onChange(provider)}
+      {PROVIDER_IDS.map((id) => (
+        <FilterItem
+          key={id}
+          active={value === id}
+          label={PROVIDER_LABELS[id]}
+          onClick={() => onSelect(id)}
         />
       ))}
     </div>
   );
-}
+};
 
-function FilterButton({
+function FilterItem({
   active,
   label,
   onClick,
@@ -40,10 +122,10 @@ function FilterButton({
 }) {
   return (
     <button
-      className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] ${
+      className={`flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-xs ${
         active
-          ? "bg-[var(--color-accent-bg)] font-semibold text-[#08100c]"
-          : "bg-[var(--color-bg-elevated)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]"
+          ? "bg-[var(--color-bg-hover)] font-medium text-[var(--color-text-primary)]"
+          : "text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
       }`}
       onClick={onClick}
     >

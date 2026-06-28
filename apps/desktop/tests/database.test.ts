@@ -298,4 +298,46 @@ describe("AppDatabase", () => {
       database.getConversation("html-conversation")?.messages[0]?.providerHtml,
     ).toContain("<strong>Rendered answer</strong>");
   });
+
+  it("persists structured assistant content blocks", () => {
+    database = new AppDatabase(":memory:");
+    database.createConversation({
+      id: "structured-conversation",
+      title: "Structured",
+      provider: "chatgpt",
+    });
+    database.addMessage({
+      id: "structured-message",
+      conversationId: "structured-conversation",
+      role: "assistant",
+      content: [
+        { type: "text", text: "Rendered answer" },
+        { type: "image", src: "https://example.com/chart.png", alt: "chart" },
+        {
+          type: "math",
+          tex: "x^2+y^2",
+          display: false,
+          source: "katex",
+        },
+        {
+          type: "html",
+          kind: "provider-assistant",
+          html: "<div><p>Rendered answer</p></div>",
+        },
+      ],
+      providerHtml: "<div><p>Rendered answer</p></div>",
+      status: "completed",
+      provider: "chatgpt",
+      createdAt: new Date().toISOString(),
+    });
+
+    expect(
+      database.getConversation("structured-conversation")?.messages[0]?.content,
+    ).toContainEqual({
+      type: "math",
+      tex: "x^2+y^2",
+      display: false,
+      source: "katex",
+    });
+  });
 });

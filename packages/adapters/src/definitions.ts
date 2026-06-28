@@ -1,4 +1,4 @@
-import type { ProviderId, ProviderMode } from "@aihub/core";
+﻿import type { ProviderId, ProviderMode } from "@aihub/core";
 
 export interface ProviderModeDefinition {
   mode: ProviderMode;
@@ -13,6 +13,7 @@ export interface ProviderDefinition {
   loginUrl: string;
   allowedOrigins: string[];
   newConversationUrls: string[];
+  conversationUrlPattern?: RegExp;
   composerSelectors: string[];
   submitSelectors: string[];
   stopSelectors: string[];
@@ -24,6 +25,7 @@ export interface ProviderDefinition {
   fileInputSelectors: string[];
   attachmentControlSelectors: string[];
   attachmentControlLabels: string[];
+  attachmentCapabilityConfidence: "verified" | "partial" | "unverified";
   modeDefinitions: ProviderModeDefinition[];
   modelControlSelectors: string[];
   capabilities: string[];
@@ -58,55 +60,13 @@ const commonModelControls = [
   "[class*='model-switcher']",
 ];
 
-const modes = {
-  reasoning: {
-    mode: "reasoning",
-    label: "深度思考",
-    matchLabels: [
-      "深度思考",
-      "深度推理",
-      "思考",
-      "推理",
-      "Deep Think",
-      "Thinking",
-      "Reasoning",
-    ],
-  },
-  webSearch: {
-    mode: "web-search",
-    label: "联网搜索",
-    matchLabels: ["联网搜索", "联网", "搜索", "Web Search", "Search"],
-  },
-  imageGeneration: {
-    mode: "image-generation",
-    label: "图片生成",
-    matchLabels: [
-      "图片生成",
-      "生成图片",
-      "AI 作图",
-      "Create image",
-      "Image generation",
-    ],
-  },
-  coding: {
-    mode: "coding",
-    label: "编程",
-    matchLabels: ["编程", "代码", "Coding", "Code"],
-  },
-  documents: {
-    mode: "documents",
-    label: "文档",
-    matchLabels: ["文档", "Documents", "Document"],
-  },
-} satisfies Record<string, ProviderModeDefinition>;
-
 const doubaoModes: ProviderModeDefinition[] = [
   {
     mode: "reasoning",
     label: "专家模式",
     matchLabels: ["专家"],
-    openerLabels: ["快速", "专家"],
-    disabledLabels: ["快速"],
+    openerLabels: ["快捷", "专家"],
+    disabledLabels: ["快捷"],
   },
   {
     mode: "image-generation",
@@ -139,23 +99,25 @@ function websiteControls(
   options?: {
     attachmentControlSelectors?: string[];
     modelControlSelectors?: string[];
+    attachmentCapabilityConfidence?: ProviderDefinition["attachmentCapabilityConfidence"];
   },
 ): Pick<
   ProviderDefinition,
   | "fileInputSelectors"
   | "attachmentControlSelectors"
   | "attachmentControlLabels"
+  | "attachmentCapabilityConfidence"
   | "modeDefinitions"
   | "modelControlSelectors"
 > {
   return {
     fileInputSelectors: commonFileInputs,
-    attachmentControlSelectors:
-      options?.attachmentControlSelectors ?? [],
+    attachmentControlSelectors: options?.attachmentControlSelectors ?? [],
     attachmentControlLabels: commonAttachmentLabels,
+    attachmentCapabilityConfidence:
+      options?.attachmentCapabilityConfidence ?? "verified",
     modeDefinitions,
-    modelControlSelectors:
-      options?.modelControlSelectors ?? commonModelControls,
+    modelControlSelectors: options?.modelControlSelectors ?? commonModelControls,
   };
 }
 
@@ -165,6 +127,7 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
     loginUrl: "https://chatgpt.com/",
     allowedOrigins: ["https://chatgpt.com", "https://auth.openai.com"],
     newConversationUrls: ["https://chatgpt.com/"],
+    conversationUrlPattern: /\/c\/([a-z0-9-]+)/,
     composerSelectors: [
       "#prompt-textarea",
       "[contenteditable='true'][data-lexical-editor='true']",
@@ -189,13 +152,13 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
     ...websiteControls([
       {
         mode: "web-search",
-        label: "深度研究",
+        label: "Deep Research",
         matchLabels: ["深度研究", "查找资料"],
         openerLabels: ["添加文件等"],
       },
       {
         mode: "image-generation",
-        label: "创建图片",
+        label: "Create Image",
         matchLabels: ["创建图片", "生成图片"],
         openerLabels: ["添加文件等"],
       },
@@ -205,13 +168,14 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
         "[data-testid='model-switcher-dropdown-button']",
       ],
     }),
-    capabilities: ["联网", "文件", "图像", "代码"],
+    capabilities: ["web", "files", "images", "code"],
   },
   claude: {
     id: "claude",
     loginUrl: "https://claude.ai/new",
     allowedOrigins: ["https://claude.ai"],
     newConversationUrls: ["https://claude.ai/new"],
+    conversationUrlPattern: /\/chat\/([a-z0-9-]+)/,
     composerSelectors: [
       "div[contenteditable='true'][role='textbox']",
       "[contenteditable='true'][data-testid*='composer']",
@@ -244,8 +208,9 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
         "button[aria-label*='model' i]",
         "[data-testid*='model']",
       ],
+      attachmentCapabilityConfidence: "unverified",
     }),
-    capabilities: ["长文本", "文件", "代码"],
+    capabilities: ["long-form", "files", "code"],
   },
   doubao: {
     id: "doubao",
@@ -256,6 +221,7 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       "https://sso.doubao.com",
     ],
     newConversationUrls: ["https://www.doubao.com/chat/"],
+    conversationUrlPattern: /\/chat\/(\w+)/,
     composerSelectors: [
       "#input-engine-container [contenteditable='true']",
       "#input-engine-container textarea",
@@ -277,16 +243,31 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       "button[aria-label*='Stop']",
     ],
     assistantMessageSelectors: [
-      "[data-testid*='assistant']",
+      "[data-message-id]",
       "[data-role='assistant']",
+      "[data-testid*='assistant']",
       "main [data-message-role='assistant']",
+      "[data-copy-telemetry='right_click_copy']",
+      "[data-container-type='block-v2']",
       "[class*='assistant-message']",
+      "[class*='bot-message']",
+      "[class*='response-content']",
+      "[class*='chat-message'][class*='bot']",
+      "[class*='answer-content']",
+      "[class*='markdown-body']",
       "main [class*='message-content']",
       "main [class*='markdown']",
+      "main [role='article']",
+      "main [role='log'] > div:last-child",
     ],
     loginMarkers: [
-      "button[class*='login']",
       "input[placeholder*='手机号']",
+      "input[type='tel']",
+    ],
+    authBlockerSelectors: [
+      "[role='dialog'] button[class*='login']",
+      "[class*='modal'] button[class*='login']",
+      "input[placeholder*='验证码']",
       "input[type='tel']",
     ],
     submitWithEnter: true,
@@ -299,7 +280,7 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
     ...websiteControls(doubaoModes, {
       modelControlSelectors: [],
     }),
-    capabilities: ["中文", "联网", "图像"],
+    capabilities: ["chinese", "web", "image"],
   },
   kimi: {
     id: "kimi",
@@ -310,6 +291,7 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       "https://kimi.moonshot.cn",
     ],
     newConversationUrls: ["https://www.kimi.com/"],
+    conversationUrlPattern: /\/chat\/(\w+)/,
     composerSelectors: [
       "div[contenteditable='true'][role='textbox']",
       "textarea[placeholder*='输入']",
@@ -340,7 +322,7 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       attachmentControlSelectors: [".toolkit-trigger-btn"],
       modelControlSelectors: [".current-model"],
     }),
-    capabilities: ["长文本", "联网", "文件"],
+    capabilities: ["long-form", "web", "files"],
   },
   deepseek: {
     id: "deepseek",
@@ -350,6 +332,7 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       "https://oauth2callback.deepseek.com",
     ],
     newConversationUrls: ["https://chat.deepseek.com/"],
+    conversationUrlPattern: /[?&]q=([^&]+)/,
     composerSelectors: [
       "textarea[placeholder*='DeepSeek']",
       "textarea[placeholder*='发送']",
@@ -378,18 +361,18 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
     ...websiteControls([
       {
         mode: "reasoning",
-        label: "深度思考",
+        label: "Deep Think",
         matchLabels: ["深度思考"],
       },
       {
         mode: "web-search",
-        label: "智能搜索",
+        label: "Smart Search",
         matchLabels: ["智能搜索"],
       },
     ], {
       modelControlSelectors: [],
     }),
-    capabilities: ["推理", "代码", "中文"],
+    capabilities: ["reasoning", "code", "chinese"],
   },
   hunyuan: {
     id: "hunyuan",
@@ -400,10 +383,12 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       "https://xui.ptlogin2.qq.com",
     ],
     newConversationUrls: ["https://yuanbao.tencent.com/"],
+    conversationUrlPattern: /\/chat\/(\w+)/,
     composerSelectors: [
       "div[contenteditable='true'][role='textbox']",
       "textarea[placeholder*='输入']",
       "[contenteditable='true']",
+      ".ql-editor",
     ],
     submitSelectors: [
       "button[aria-label*='发送']",
@@ -432,14 +417,15 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
     ...websiteControls([
       {
         mode: "reasoning",
-        label: "深度思考",
+        label: "Deep Think",
         matchLabels: ["深度思考"],
       },
     ], {
-      attachmentControlSelectors: ["button[aria-label='工具']"],
+      attachmentControlSelectors: [],
       modelControlSelectors: ["[aria-label='模型选择']"],
+      attachmentCapabilityConfidence: "unverified",
     }),
-    capabilities: ["中文", "联网", "图像"],
+    capabilities: ["chinese", "web", "image"],
   },
   qianwen: {
     id: "qianwen",
@@ -451,6 +437,7 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       "https://login.taobao.com",
     ],
     newConversationUrls: ["https://www.qianwen.com/"],
+    conversationUrlPattern: /\/chat\/(\w+)/,
     composerSelectors: [
       "div[contenteditable='true'][role='textbox']",
       "textarea[placeholder*='输入']",
@@ -467,6 +454,13 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       "button[aria-label*='Stop']",
     ],
     assistantMessageSelectors: [
+      "div[class*='message-select-wrapper-answer']",
+      "div[class*='chat-answers-card-wrap']",
+      "div.chat-round.last-message-item",
+      "div[data-chat-answers-wrap]",
+      "div[data-chat-list-key]",
+      "div.answer-common-card",
+      "div.qk-markdown",
       "[data-role='assistant']",
       "[data-testid*='assistant']",
       "[class*='assistant-message']",
@@ -480,28 +474,31 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
     ...websiteControls([
       {
         mode: "reasoning",
-        label: "思考",
+        label: "Thinking",
         matchLabels: ["思考"],
       },
       {
         mode: "web-search",
-        label: "研究",
+        label: "Research",
         matchLabels: ["研究"],
       },
       {
         mode: "image-generation",
-        label: "AI生图",
+        label: "AI Image",
         matchLabels: ["AI生图"],
+        openerLabels: ["更多"],
       },
       {
         mode: "coding",
-        label: "代码",
+        label: "Code",
         matchLabels: ["代码"],
+        openerLabels: ["更多"],
       },
       {
         mode: "documents",
-        label: "PPT创作",
+        label: "PPT Create",
         matchLabels: ["PPT创作"],
+        openerLabels: ["更多"],
       },
     ], {
       attachmentControlSelectors: [
@@ -510,28 +507,11 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       modelControlSelectors: [
         "div[type='button'][aria-haspopup='dialog'][data-state]",
       ],
+      attachmentCapabilityConfidence: "partial",
     }),
-    capabilities: ["中文", "联网", "文件"],
+    capabilities: ["chinese", "web", "files"],
   },
 };
-
-providerDefinitions.hunyuan.authBlockerSelectors = [
-  ".agent-dialogue__tool__login",
-  ".hyc-login__close",
-];
-providerDefinitions.hunyuan.attachmentControlSelectors = [];
-
-providerDefinitions.qianwen.modeDefinitions =
-  providerDefinitions.qianwen.modeDefinitions.map((definition) =>
-    definition.mode === "image-generation" ||
-      definition.mode === "coding" ||
-      definition.mode === "documents"
-      ? {
-          ...definition,
-          openerLabels: ["\u66f4\u591a"],
-        }
-      : definition
-  );
 
 export function firstMatch(
   document: Document,

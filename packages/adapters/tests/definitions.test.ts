@@ -1,4 +1,4 @@
-import { JSDOM } from "jsdom";
+﻿import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 import { firstMatch, providerDefinitions } from "../src";
 import { PROVIDER_IDS } from "@aihub/core";
@@ -48,7 +48,7 @@ describe("semantic selector fallbacks", () => {
     }
   });
 
-  it("uses provider-specific website modes", () => {
+  it("uses provider-specific website modes and attachment confidence", () => {
     expect(
       providerDefinitions.deepseek.modeDefinitions.map((item) => item.mode),
     ).toEqual(["reasoning", "web-search"]);
@@ -65,8 +65,8 @@ describe("semantic selector fallbacks", () => {
     ).toMatchObject({
       label: "专家模式",
       matchLabels: ["专家"],
-      openerLabels: ["快速", "专家"],
-      disabledLabels: ["快速"],
+      openerLabels: ["快捷", "专家"],
+      disabledLabels: ["快捷"],
     });
     expect(
       providerDefinitions.doubao.modeDefinitions.find(
@@ -81,9 +81,15 @@ describe("semantic selector fallbacks", () => {
       .toContain(".toolkit-trigger-btn");
     expect(providerDefinitions.kimi.modelControlSelectors)
       .toContain(".current-model");
+    expect(providerDefinitions.chatgpt.attachmentCapabilityConfidence)
+      .toBe("verified");
+    expect(providerDefinitions.qianwen.attachmentCapabilityConfidence)
+      .toBe("partial");
+    expect(providerDefinitions.claude.attachmentCapabilityConfidence)
+      .toBe("unverified");
     expect(
       providerDefinitions.qianwen.modeDefinitions.map((item) => item.label),
-    ).toEqual(["思考", "研究", "AI生图", "代码", "PPT创作"]);
+    ).toEqual(["Thinking", "Research", "AI Image", "Code", "PPT Create"]);
   });
 
   it("prefers a usable composer over stale login elements", () => {
