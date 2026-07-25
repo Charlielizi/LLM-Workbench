@@ -7,30 +7,36 @@ import {
   Globe2,
   Sparkles,
 } from "lucide-react";
-import { PROVIDER_IDS, PROVIDER_LABELS } from "@aihub/core";
+import { PROVIDER_LABELS } from "@aihub/core";
+import { useI18n, type TranslationKey } from "../../i18n";
 import { useAppStore } from "../../stores/app-store";
 import { useComposerStore } from "../../stores/composer-store";
 import { useSettingsStore } from "../../stores/settings-store";
 
-const SUGGESTIONS = [
+const SUGGESTIONS: Array<{
+  title: TranslationKey;
+  prompt: TranslationKey;
+  icon: typeof Sparkles;
+}> = [
   {
-    title: "Explain a complex idea",
-    prompt: "Explain this concept using intuition, analogies, and step-by-step examples:",
+    title: "welcome.suggestion1Title",
+    prompt: "welcome.suggestion1Prompt",
     icon: Sparkles,
   },
   {
-    title: "Structure a research plan",
-    prompt: "Turn the following problem into assumptions, evidence, and next experiments:",
+    title: "welcome.suggestion2Title",
+    prompt: "welcome.suggestion2Prompt",
     icon: Database,
   },
   {
-    title: "Compare multiple models",
-    prompt: "Compare the options across accuracy, actionability, and risk:",
+    title: "welcome.suggestion3Title",
+    prompt: "welcome.suggestion3Prompt",
     icon: Globe2,
   },
 ];
 
 export function WelcomeView() {
+  const { t } = useI18n();
   const [step, setStep] = useState(0);
   const providers = useAppStore((state) => state.snapshot.providers);
   const createConversation = useAppStore(
@@ -47,6 +53,8 @@ export function WelcomeView() {
   );
   const defaultProvider =
     useSettingsStore((state) => state.defaultProvider) ?? "chatgpt";
+  const providerOrder = useSettingsStore((state) => state.providerOrder);
+  const enabledProviders = useSettingsStore((state) => state.enabledProviders);
 
   async function startWithPrompt(prompt: string) {
     await createConversation(defaultProvider);
@@ -60,27 +68,27 @@ export function WelcomeView() {
     const steps = [
       {
         icon: Bot,
-        title: "Welcome to AIHub",
-        description:
-          "Use seven official provider websites from one local workspace. Conversations and knowledge stay on your machine.",
+        title: t("welcome.step1Title"),
+        description: t("welcome.step1Description"),
       },
       {
         icon: Globe2,
-        title: "Sign in to a provider",
-        description:
-          "Open any provider site, complete login, then start a real conversation backed by the public website UI.",
+        title: t("welcome.step2Title"),
+        description: t("welcome.step2Description"),
       },
       {
         icon: Sparkles,
-        title: "Build your workflow",
-        description:
-          "System prompts, local knowledge, cross-provider transfer, and side-by-side comparison are already available.",
+        title: t("welcome.step3Title"),
+        description: t("welcome.step3Description"),
       },
     ];
     const current = steps[step] ?? steps[0]!;
     const Icon = current.icon;
     return (
-      <main className="grid h-full min-h-0 place-items-center overflow-y-auto px-8 py-14">
+      <main
+        data-testid="welcome-onboarding"
+        className="grid h-full min-h-0 place-items-center overflow-y-auto px-8 py-14"
+      >
         <section className="w-full max-w-xl text-center">
           <div className="mx-auto grid size-20 place-items-center rounded-[2rem] border border-[var(--color-border)] bg-[var(--color-bg-elevated)] shadow-[var(--shadow-md)]">
             <Icon size={34} />
@@ -110,7 +118,9 @@ export function WelcomeView() {
               else setCompleted(true);
             }}
           >
-            {step < steps.length - 1 ? "Next" : "Enter workspace"}
+            {step < steps.length - 1
+              ? t("welcome.next")
+              : t("welcome.enter")}
             <ArrowRight size={16} />
           </button>
         </section>
@@ -119,7 +129,10 @@ export function WelcomeView() {
   }
 
   return (
-    <main className="h-full min-h-0 overflow-y-auto px-8 py-12">
+    <main
+      data-testid="welcome-workspace"
+      className="h-full min-h-0 overflow-y-auto px-8 py-12"
+    >
       <div className="mx-auto max-w-5xl">
         <div className="text-center">
           <div className="mx-auto flex items-center justify-center">
@@ -134,10 +147,10 @@ export function WelcomeView() {
             </div>
           </div>
           <h1 className="mt-6 text-4xl font-semibold tracking-tight">
-            What do you want to work on today?
+            {t("welcome.headline")}
           </h1>
           <p className="mt-3 text-base text-[var(--color-text-secondary)]">
-            Start with a prompt, or open a multi-provider comparison workspace.
+            {t("welcome.subhead")}
           </p>
         </div>
 
@@ -146,12 +159,12 @@ export function WelcomeView() {
             <button
               key={title}
               className="interactive-chip rounded-[1.75rem] border border-[var(--color-border)] bg-[var(--color-bg-elevated)] p-5 text-left shadow-[var(--shadow-sm)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-hover)] hover:shadow-[var(--shadow-md)]"
-              onClick={() => void startWithPrompt(prompt)}
+              onClick={() => void startWithPrompt(t(prompt))}
             >
               <Icon size={18} className="text-[var(--color-text-secondary)]" />
-              <div className="mt-4 text-sm font-semibold">{title}</div>
+              <div className="mt-4 text-sm font-semibold">{t(title)}</div>
               <div className="mt-2 text-sm leading-6 text-[var(--color-text-tertiary)]">
-                {prompt}
+                {t(prompt)}
               </div>
             </button>
           ))}
@@ -162,16 +175,18 @@ export function WelcomeView() {
             className="interactive-chip rounded-full border border-[var(--color-border)] bg-[var(--color-bg-soft)] px-4 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
             onClick={() => setComparisonSetupOpen(true)}
           >
-            Create comparison workspace
+            {t("welcome.createComparison")}
           </button>
         </div>
 
         <section className="mx-auto mt-12 max-w-3xl">
           <div className="mb-3 text-center text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-text-tertiary)]">
-            Provider status
+            {t("welcome.providerStatus")}
           </div>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            {PROVIDER_IDS.map((provider) => {
+            {providerOrder
+              .filter((provider) => enabledProviders.includes(provider))
+              .map((provider) => {
               const state = providers.find((item) => item.id === provider);
               return (
                 <button
@@ -194,7 +209,7 @@ export function WelcomeView() {
                   </span>
                 </button>
               );
-            })}
+              })}
           </div>
         </section>
       </div>

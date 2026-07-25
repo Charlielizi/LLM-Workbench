@@ -4,6 +4,9 @@ node_modules/
 out/
 dist/
 coverage/
+artifacts/
+playwright-report/
+test-results/
 *.log
 *.sqlite
 *.sqlite-shm
@@ -16,3 +19,4 @@ coverage/
 audit-publish/
 publish/
 .tmp/
+/ophel/

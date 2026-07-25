@@ -10,8 +10,3 @@ export function estimateTokens(text: string): number {
     Math.ceil(asciiChars / 4) + Math.ceil(cjkChars / 2),
   );
 }
-
-export function formatTokenCount(text: string): string {
-  if (!text) return "";
-  return `${text.length.toLocaleString()} 字符 · ~${estimateTokens(text).toLocaleString()} tokens`;
-}

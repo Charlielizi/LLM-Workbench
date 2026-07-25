@@ -5,14 +5,6 @@ export type DateGroup =
   | "this_month"
   | "older";
 
-export const DATE_GROUP_LABELS: Record<DateGroup, string> = {
-  today: "今天",
-  yesterday: "昨天",
-  this_week: "本周",
-  this_month: "本月",
-  older: "更早",
-};
-
 export function getDateGroup(dateString: string): DateGroup {
   const date = new Date(dateString);
   const now = new Date();
@@ -57,6 +49,7 @@ export function groupByDate<T extends { updatedAt: string }>(
 
 export function groupConversationsByDate<T extends { updatedAt: string }>(
   items: T[],
+  labelForGroup: (group: DateGroup) => string,
 ): { label: string; conversations: T[] }[] {
   const sorted = [...items].sort(
     (left, right) =>
@@ -64,7 +57,7 @@ export function groupConversationsByDate<T extends { updatedAt: string }>(
       new Date(left.updatedAt).getTime(),
   );
   return groupByDate(sorted).map(([group, conversations]) => ({
-    label: DATE_GROUP_LABELS[group],
+    label: labelForGroup(group),
     conversations,
   }));
 }

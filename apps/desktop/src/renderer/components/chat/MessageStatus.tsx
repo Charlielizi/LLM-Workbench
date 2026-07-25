@@ -1,9 +1,6 @@
 import { AlertCircle, Clock3, RotateCcw } from "lucide-react";
 import type { NormalizedMessage } from "@aihub/core";
-import {
-  messageStatusDetail,
-  messageStatusLabel,
-} from "../../utils/message-status";
+import { useI18n } from "../../i18n";
 
 export function MessageStatus({
   message,
@@ -11,12 +8,29 @@ export function MessageStatus({
 }: {
   message: Pick<
     NormalizedMessage,
-    "status" | "statusPhase" | "statusDetail" | "errorCode"
+    "status" | "statusPhase" | "statusDetail" | "errorCode" | "failureOrigin"
   >;
   onRetry: () => Promise<void>;
 }) {
-  const label = messageStatusLabel(message);
-  const detail = messageStatusDetail(message);
+  const { t } = useI18n();
+  const actionRequired = message.statusPhase === "recoverable-blocked";
+  const authRequired =
+    message.errorCode === "auth_required" ||
+    message.failureOrigin === "auth";
+  const detail = actionRequired
+    ? t("message.status.openToSubmit")
+    : authRequired
+      ? t("message.status.openToSignIn")
+      : message.statusDetail;
+  const failedLabel = authRequired
+    ? t("message.status.signInRequired")
+    : message.failureOrigin === "external"
+      ? t("message.status.unavailable")
+      : message.failureOrigin === "cancelled"
+        ? t("message.status.cancelled")
+        : message.failureOrigin === "client"
+          ? t("message.status.interactionFailed")
+          : t("message.status.failed");
 
   if (message.status === "pending") {
     return (
@@ -25,7 +39,11 @@ export function MessageStatus({
         title={detail}
       >
         <Clock3 size={13} />
-        {label ?? "Sending"}
+        {actionRequired
+          ? t("message.status.actionRequired")
+          : message.statusPhase === "checking-auth"
+            ? t("message.status.checkingSignIn")
+            : t("message.status.sending")}
       </span>
     );
   }
@@ -33,7 +51,7 @@ export function MessageStatus({
     return (
       <span className="inline-flex items-center gap-1 font-normal text-[var(--color-text-secondary)]">
         <i className="size-2 animate-pulse rounded-full bg-current" />
-        {label ?? "Receiving reply"}
+        {t("message.status.receiving")}
       </span>
     );
   }
@@ -44,11 +62,12 @@ export function MessageStatus({
         title={detail}
       >
         <AlertCircle size={13} />
-        {label ?? "Failed"}
+        {failedLabel}
         <button
           className="ml-1 rounded p-1 hover:bg-[var(--color-danger-bg)]"
           onClick={() => void onRetry()}
-          title="Retry"
+          title={t("common.retry")}
+          aria-label={t("common.retry")}
         >
           <RotateCcw size={12} />
         </button>

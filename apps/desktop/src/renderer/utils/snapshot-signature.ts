@@ -1,4 +1,9 @@
-import type { ContentBlock, NormalizedConversation, NormalizedMessage } from "@aihub/core";
+import type {
+  AppSnapshot,
+  ContentBlock,
+  NormalizedConversation,
+  NormalizedMessage,
+} from "@aihub/core";
 
 function blockSignature(block: ContentBlock): string {
   switch (block.type) {
@@ -42,8 +47,21 @@ export function conversationSnapshotSignature(
     String(conversation.pinned),
     conversation.pinnedAt ?? "",
     conversation.externalId ?? "",
+    conversation.syncStatus ?? "",
+    conversation.lastSyncedAt ?? "",
+    conversation.syncError ?? "",
+    String(conversation.remoteMissingCount ?? 0),
     conversation.updatedAt,
     String(conversation.messages.length),
     messageSignature(conversation.messages.at(-1)),
   ].join("\u241d");
+}
+
+export function appSnapshotMetadataSignature(
+  snapshot: Pick<AppSnapshot, "providers" | "comparisons">,
+): string {
+  return JSON.stringify({
+    providers: snapshot.providers,
+    comparisons: snapshot.comparisons,
+  });
 }

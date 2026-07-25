@@ -3,6 +3,7 @@ import { ChevronDown } from "lucide-react";
 import { createPortal } from "react-dom";
 import { PROVIDER_IDS, PROVIDER_LABELS } from "@aihub/core";
 import type { ProviderId } from "@aihub/core";
+import { useI18n } from "../../i18n";
 
 export type ProviderFilter = ProviderId | "all";
 
@@ -13,6 +14,7 @@ export function ProviderFilterTabs({
   value: ProviderFilter;
   onChange: (value: ProviderFilter) => void;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -38,7 +40,7 @@ export function ProviderFilterTabs({
     };
   }, [open]);
 
-  const label = value === "all" ? "All providers" : PROVIDER_LABELS[value];
+  const label = value === "all" ? t("nav.allProviders") : PROVIDER_LABELS[value];
 
   return (
     <>
@@ -55,6 +57,7 @@ export function ProviderFilterTabs({
           <FilterDropdown
             ref={menuRef}
             value={value}
+            allLabel={t("nav.allProviders")}
             anchor={buttonRef.current}
             onSelect={(v) => {
               onChange(v);
@@ -72,11 +75,13 @@ const FilterDropdown = ({
   value,
   anchor,
   onSelect,
+  allLabel,
 }: {
   ref: React.RefObject<HTMLDivElement | null>;
   value: ProviderFilter;
   anchor: HTMLButtonElement | null;
   onSelect: (v: ProviderFilter) => void;
+  allLabel: string;
 }) => {
   const rect = anchor?.getBoundingClientRect();
   const style: React.CSSProperties = rect
@@ -96,7 +101,7 @@ const FilterDropdown = ({
     >
       <FilterItem
         active={value === "all"}
-        label="All providers"
+        label={allLabel}
         onClick={() => onSelect("all")}
       />
       {PROVIDER_IDS.map((id) => (

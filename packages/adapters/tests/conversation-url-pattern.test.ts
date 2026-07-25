@@ -14,6 +14,7 @@ describe("conversationUrlPattern", () => {
     ["doubao", "https://www.doubao.com/chat/abc123xyz", "abc123xyz"],
     ["kimi", "https://www.kimi.com/chat/conv_123", "conv_123"],
     ["deepseek", "https://chat.deepseek.com/?q=conversation-id-123", "conversation-id-123"],
+    ["deepseek", "https://chat.deepseek.com/a/chat/s/conversation-id-456", "conversation-id-456"],
     ["hunyuan", "https://yuanbao.tencent.com/chat/abc123", "abc123"],
     ["qianwen", "https://www.qianwen.com/chat/conv_456", "conv_456"],
   ];

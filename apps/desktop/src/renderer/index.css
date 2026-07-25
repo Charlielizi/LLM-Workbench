@@ -38,6 +38,11 @@
     cursor: pointer;
   }
 
+  :where(button, input, textarea, select, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-text-primary);
+    outline-offset: 2px;
+  }
+
   ::selection {
     color: var(--color-send-text);
     background: var(--color-send-bg);
@@ -46,6 +51,66 @@
   * {
     scrollbar-color: var(--color-border-strong) transparent;
     scrollbar-width: thin;
+  }
+}
+
+html[data-density="compact"] [data-testid="composer-input"] {
+  min-height: 56px !important;
+}
+
+html[data-density="compact"] [data-testid="composer"] {
+  padding-bottom: 0.75rem !important;
+}
+
+html[data-density="compact"] [data-testid="settings-view"] > header {
+  padding-block: 0.625rem !important;
+}
+
+html[data-density="compact"] [data-testid="settings-view"] nav {
+  padding: 0.5rem !important;
+}
+
+html[data-density="compact"] [data-testid="settings-view"] nav button {
+  margin-bottom: 0 !important;
+  padding-block: 0.375rem !important;
+}
+
+html[data-density="compact"] [data-testid="settings-view"] [data-setting-row] {
+  padding-block: 0.5rem !important;
+}
+
+html[data-density="compact"] [data-testid^="conversation-item-"] {
+  padding-block: 0.125rem !important;
+}
+
+html[data-density="compact"] [data-testid="message-list"] > div {
+  gap: 1rem !important;
+  padding-block: 0.5rem 1rem !important;
+}
+
+html[data-code-wrap="true"] pre,
+html[data-code-wrap="true"] pre code {
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere;
+}
+
+html[data-motion="reduced"] *,
+html[data-motion="reduced"] *::before,
+html[data-motion="reduced"] *::after {
+  scroll-behavior: auto !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-motion="system"] *,
+  html[data-motion="system"] *::before,
+  html[data-motion="system"] *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 

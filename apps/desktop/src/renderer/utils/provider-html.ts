@@ -108,9 +108,12 @@ function pruneEmptyLayoutNodes(root: ParentNode): void {
   }
 }
 
-export function renderProviderHtml(html: string): string {
+export function renderProviderHtml(html: string, suppressImages = false): string {
   const template = document.createElement("template");
   template.innerHTML = html;
+  if (suppressImages) {
+    template.content.querySelectorAll("img,picture").forEach((element) => element.remove());
+  }
   replaceFormulaContainers(template.content);
 
   for (const element of Array.from(template.content.querySelectorAll<HTMLElement>("*"))) {

@@ -3,7 +3,7 @@ import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import katex from "katex";
 import type { NormalizedMessage } from "@aihub/core";
-import { messageStatusDetail } from "../../utils/message-status";
+import { useI18n } from "../../i18n";
 import { CodeBlock, MarkdownPre } from "./CodeBlock";
 import { ProviderHtmlContent } from "./ProviderHtmlContent";
 
@@ -12,11 +12,20 @@ export function MessageContent({
 }: {
   message: NormalizedMessage;
 }) {
-  const detail = messageStatusDetail(message);
+  const { t } = useI18n();
+  const detail =
+    message.statusPhase === "recoverable-blocked"
+      ? t("message.status.openToSubmit")
+      : message.failureOrigin === "auth" || message.errorCode === "auth_required"
+        ? t("message.status.openToSignIn")
+        : message.status === "failed" || message.status === "pending"
+          ? message.statusDetail
+          : undefined;
   const htmlBlock = message.content.find((block) => block.type === "html");
   const providerHtml = htmlBlock?.type === "html"
     ? htmlBlock.html
     : message.providerHtml;
+  const imageBlocks = message.content.filter((block) => block.type === "image");
 
   if (
     message.role === "assistant" &&
@@ -24,7 +33,17 @@ export function MessageContent({
   ) {
     return (
       <div className="message-markdown text-[15px] leading-7">
-        <ProviderHtmlContent html={providerHtml} />
+        <ProviderHtmlContent html={providerHtml} suppressImages={imageBlocks.length > 0} />
+        {imageBlocks.map((block, index) => (
+          <img
+            key={`${block.src}-${index}`}
+            src={block.src}
+            alt={block.alt ?? t("message.assistantImage")}
+            title={block.title}
+            loading="lazy"
+            className="my-4 max-h-[32rem] max-w-full rounded-lg border border-[var(--color-border)] object-contain"
+          />
+        ))}
         {detail && (
           <p className="mt-3 rounded-2xl border border-[var(--color-border-light)] bg-[var(--color-bg-soft)] px-3 py-2 text-sm text-[var(--color-text-secondary)]">
             {detail}
@@ -102,7 +121,7 @@ export function MessageContent({
             <img
               key={index}
               src={block.src}
-              alt={block.alt ?? "assistant image"}
+              alt={block.alt ?? t("message.assistantImage")}
               title={block.title}
               className="my-4 max-h-[32rem] rounded-2xl border border-[var(--color-border)]"
             />

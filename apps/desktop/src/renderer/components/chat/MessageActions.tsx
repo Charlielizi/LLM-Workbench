@@ -3,6 +3,8 @@ import type { NormalizedMessage } from "@aihub/core";
 import { useAppStore } from "../../stores/app-store";
 import { useToastStore } from "../../stores/toast-store";
 import { messageText } from "../../utils/message-text";
+import { confirmDialog } from "../../stores/dialog-store";
+import { useI18n } from "../../i18n";
 
 export function MessageActions({
   message,
@@ -15,6 +17,7 @@ export function MessageActions({
   onEdit: () => void;
   onRetry: () => void;
 }) {
+  const { t } = useI18n();
   const deleteMessage = useAppStore((state) => state.deleteMessage);
   const addToast = useToastStore((state) => state.addToast);
   const locked =
@@ -22,12 +25,19 @@ export function MessageActions({
 
   async function copy() {
     await navigator.clipboard.writeText(messageText(message));
-    addToast("Message copied", "success");
+    addToast(t("message.copied"), "success");
   }
 
   async function remove() {
-    if (!window.confirm("Delete this message?")) return;
-    await deleteMessage(message.conversationId, message.id);
+    const confirmed = await confirmDialog({
+      title: t("message.deleteTitle"),
+      description: t("message.deleteDescription"),
+      destructive: true,
+    });
+    if (!confirmed) return;
+    if (await deleteMessage(message.conversationId, message.id)) {
+      addToast(t("toast.deleted"), "success");
+    }
   }
 
   return (
@@ -37,10 +47,14 @@ export function MessageActions({
       }`}
     >
       <div className="panel-glass flex items-center gap-1 rounded-full border border-[var(--color-border)] p-1 shadow-[var(--shadow-sm)]">
-        <ActionButton label="Copy" icon={Copy} onClick={() => void copy()} />
+        <ActionButton
+          label={t("message.copy")}
+          icon={Copy}
+          onClick={() => void copy()}
+        />
         {message.role === "assistant" && canRetry && (
           <ActionButton
-            label="Retry"
+            label={t("message.retry")}
             icon={RotateCcw}
             disabled={locked}
             onClick={onRetry}
@@ -48,14 +62,14 @@ export function MessageActions({
         )}
         {message.role === "user" && (
           <ActionButton
-            label="Edit"
+            label={t("message.edit")}
             icon={Edit3}
             disabled={locked}
             onClick={onEdit}
           />
         )}
         <ActionButton
-          label="Delete"
+          label={t("message.delete")}
           icon={Trash2}
           disabled={locked}
           danger

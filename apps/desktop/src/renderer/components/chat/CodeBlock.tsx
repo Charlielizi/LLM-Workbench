@@ -2,6 +2,7 @@ import { isValidElement } from "react";
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
 import { Check, Copy } from "lucide-react";
 import { useState } from "react";
+import { useI18n } from "../../i18n";
 
 export function CodeBlock({
   code,
@@ -12,6 +13,7 @@ export function CodeBlock({
   language?: string;
   highlighted?: ReactNode;
 }) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
 
   async function copy() {
@@ -27,9 +29,11 @@ export function CodeBlock({
         <button
           className="flex items-center gap-1.5 rounded-md px-2 py-1 hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
           onClick={() => void copy()}
+          aria-label={copied ? t("common.copied") : t("common.copyCode")}
+          title={copied ? t("common.copied") : t("common.copyCode")}
         >
           {copied ? <Check size={13} /> : <Copy size={13} />}
-          {copied ? "已复制" : "复制"}
+          {copied ? t("common.copied") : t("common.copyCode")}
         </button>
       </div>
       <pre className="m-0 overflow-x-auto p-4 font-mono text-[13px] leading-6">

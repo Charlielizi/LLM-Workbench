@@ -1,7 +1,8 @@
 {
   "name": "@aihub/desktop",
-  "version": "0.1.0",
+  "version": "0.1.0-rc.1",
   "private": true,
+  "author": "AIHub contributors",
   "description": "Unified local desktop client for provider websites",
   "main": ".vite/build/main.js",
   "scripts": {
@@ -9,7 +10,9 @@
     "build": "electron-forge package",
     "package": "electron-forge make --platform win32",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run tests",
+    "test:ai:e2e": "playwright test --config playwright.config.ts",
+    "test:ai:e2e:update": "playwright test --config playwright.config.ts --update-snapshots"
   },
   "dependencies": {
     "@aihub/adapters": "workspace:*",
@@ -34,6 +37,7 @@
     "@electron-forge/maker-squirrel": "^7.11.2",
     "@electron-forge/plugin-vite": "^7.11.2",
     "@electron-forge/shared-types": "^7.11.2",
+    "@playwright/test": "^1.61.1",
     "@types/electron-squirrel-startup": "^1.0.2",
     "@types/node": "^24.10.1",
     "@types/react": "^19.1.8",

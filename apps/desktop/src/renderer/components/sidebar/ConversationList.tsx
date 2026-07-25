@@ -1,6 +1,7 @@
 import { MessageSquare } from "lucide-react";
 import type { NormalizedConversation } from "@aihub/core";
 import { groupConversationsByDate } from "../../utils/date-grouping";
+import { useI18n } from "../../i18n";
 import { ConversationItem } from "./ConversationItem";
 
 export function ConversationList({
@@ -16,9 +17,22 @@ export function ConversationList({
   selectedIds?: Set<string>;
   onToggleSelection?: (id: string) => void;
 }) {
+  const { t } = useI18n();
   const pinned = conversations.filter((conversation) => conversation.pinned);
   const groups = groupConversationsByDate(
     conversations.filter((conversation) => !conversation.pinned),
+    (group) =>
+      t(
+        group === "today"
+          ? "date.today"
+          : group === "yesterday"
+            ? "date.yesterday"
+            : group === "this_week"
+              ? "date.thisWeek"
+              : group === "this_month"
+                ? "date.thisMonth"
+                : "date.older",
+      ),
   );
 
   if (conversations.length === 0) {
@@ -26,9 +40,7 @@ export function ConversationList({
       <div className="grid flex-1 place-items-center px-6 text-center text-sm leading-6 text-[var(--color-text-tertiary)]">
         <div className="max-w-52">
           <MessageSquare className="mx-auto mb-3" size={24} />
-          {searching
-            ? "No matching conversations"
-            : "Sign in to a provider, then start a conversation."}
+          {searching ? t("search.noMatches") : t("conversation.empty")}
         </div>
       </div>
     );
@@ -39,7 +51,7 @@ export function ConversationList({
       {pinned.length > 0 && (
         <section className="mb-3">
           <h2 className="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--color-text-tertiary)]">
-            Pinned
+            {t("conversation.pinnedGroup")}
           </h2>
           {pinned.map((conversation) => (
             <ConversationItem

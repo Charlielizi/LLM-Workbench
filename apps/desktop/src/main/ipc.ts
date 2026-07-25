@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  appSnapshotSchema,
   conversationIdSchema,
   conversationPinSchema,
   conversationRenameSchema,
@@ -18,11 +19,17 @@ import {
   folderRenameSchema,
   tagCreateSchema,
   appSettingsSchema,
+  dataExportResultSchema,
+  dataStorageSummarySchema,
   settingsImportSchema,
+  settingsImportPreviewSchema,
   externalUrlSchema,
   messageDeleteSchema,
   messageEditResendSchema,
+  providerAdapterEventsQuerySchema,
+  providerCleanModeSchema,
   providerLayoutSchema,
+  providerSmokeInspectionSchema,
   systemPromptCreateSchema,
   systemPromptIdSchema,
   systemPromptSetForConversationSchema,
@@ -32,6 +39,9 @@ import {
   transferConfirmSchema,
   transferPreviewSchema,
   insertTextSchema,
+  currentWebConversationSyncResultSchema,
+  webHistorySyncResultSchema,
+  websiteConversationSnapshotSchema,
 } from "@aihub/core";
 import { ipcMain } from "electron";
 import type { AppService } from "./app-service";
@@ -63,6 +73,10 @@ export function registerIpc(service: AppService): void {
     "settings:set",
     "settings:export",
     "settings:import",
+    "settings:preview-import",
+    "data:get-storage-summary",
+    "data:export-all",
+    "data:open-folder",
     "app:open-external",
     "conversation:search",
     "conversation:pin",
@@ -76,8 +90,13 @@ export function registerIpc(service: AppService): void {
     "provider:set-layout",
     "provider:hide-self",
     "provider:discover-models",
+    "provider:recover",
+    "provider:clear-site-data",
     "provider:insert-text",
     "provider:submit-enter",
+    "provider:sync-current-conversation",
+    "provider:sync-web-history",
+    "provider:get-website-snapshot",
     "system-prompt:list",
     "system-prompt:create",
     "system-prompt:update",
@@ -88,7 +107,7 @@ export function registerIpc(service: AppService): void {
   ]) {
     ipcMain.removeHandler(channel);
   }
-  ipcMain.handle("app:get-snapshot", () => service.snapshot());
+  ipcMain.handle("app:get-snapshot", () => appSnapshotSchema.parse(service.snapshot()));
   ipcMain.handle("conversation:create", (_event, provider) =>
     service.createConversation(providerIdSchema.parse(provider)),
   );
@@ -164,6 +183,19 @@ export function registerIpc(service: AppService): void {
     const { json } = settingsImportSchema.parse(input);
     return service.importSettings(json);
   });
+  ipcMain.handle("settings:preview-import", (_event, input) => {
+    const { json } = settingsImportSchema.parse(input);
+    return settingsImportPreviewSchema.parse(
+      service.previewSettingsImport(json),
+    );
+  });
+  ipcMain.handle("data:get-storage-summary", async () =>
+    dataStorageSummarySchema.parse(await service.getStorageSummary()),
+  );
+  ipcMain.handle("data:export-all", async () =>
+    dataExportResultSchema.parse(await service.exportAllData()),
+  );
+  ipcMain.handle("data:open-folder", () => service.openDataFolder());
   ipcMain.handle("app:open-external", (_event, url) =>
     service.openExternal(externalUrlSchema.parse(url)),
   );
@@ -211,6 +243,52 @@ export function registerIpc(service: AppService): void {
   ipcMain.handle("provider:discover-models", (_event, provider) =>
     service.discoverProviderModels(providerIdSchema.parse(provider)),
   );
+  ipcMain.handle("provider:recover", (_event, provider) =>
+    service.recoverProvider(providerIdSchema.parse(provider)),
+  );
+  ipcMain.handle("provider:clear-site-data", (_event, provider) =>
+    service.clearProviderSiteData(providerIdSchema.parse(provider)),
+  );
+  ipcMain.handle("provider:capture-anchor", (_event, provider) =>
+    service.captureProviderAnchor(providerIdSchema.parse(provider)),
+  );
+  ipcMain.handle("provider:sync-latest-response", (_event, provider) =>
+    service.syncLatestProviderResponse(providerIdSchema.parse(provider)),
+  );
+  ipcMain.handle("provider:sync-web-history", async (_event, provider) =>
+    webHistorySyncResultSchema.parse(
+      await service.syncWebHistory(providerIdSchema.parse(provider)),
+    ),
+  );
+  ipcMain.handle("provider:sync-current-conversation", async (event) =>
+    currentWebConversationSyncResultSchema.parse(
+      await service.syncCurrentWebsiteConversationByWebContents(event.sender),
+    ),
+  );
+  ipcMain.handle("provider:get-debug-snapshot", (_event, provider) =>
+    service.getProviderDebugSnapshot(providerIdSchema.parse(provider)),
+  );
+  ipcMain.handle("provider:get-website-snapshot", async (_event, provider) =>
+    websiteConversationSnapshotSchema.parse(
+      await service.getProviderWebsiteSnapshot(providerIdSchema.parse(provider)),
+    ),
+  );
+  ipcMain.handle("provider:get-latest-smoke-result", (_event, provider) =>
+    service.getLatestProviderSmokeResult(providerIdSchema.parse(provider)),
+  );
+  ipcMain.handle("provider:get-smoke-inspection", async (_event, provider) =>
+    providerSmokeInspectionSchema.parse(
+      await service.getProviderSmokeInspection(providerIdSchema.parse(provider)),
+    ),
+  );
+  ipcMain.handle("provider:list-adapter-events", (_event, input) => {
+    const { provider, limit, sinceCreatedAt } = providerAdapterEventsQuerySchema.parse(input);
+    return service.listProviderAdapterEvents(provider, limit, sinceCreatedAt);
+  });
+  ipcMain.handle("provider:set-clean-mode", (_event, input) => {
+    const { provider, enabled } = providerCleanModeSchema.parse(input);
+    return service.setProviderCleanMode(provider, enabled);
+  });
   ipcMain.handle("provider:insert-text", async (event, input) => {
     const { text } = insertTextSchema.parse({ text: input });
     const webContents = event.sender;
@@ -221,28 +299,9 @@ export function registerIpc(service: AppService): void {
       text,
     });
   });
-  ipcMain.handle("provider:submit-enter", async (event) => {
-    const webContents = event.sender;
-    if (!webContents.debugger.isAttached()) {
-      webContents.debugger.attach("1.3");
-    }
-    for (const [type, modifiers] of [
-      ["rawKeyDown", 0],
-      ["char", 0],
-      ["keyUp", 0],
-    ] as const) {
-      await webContents.debugger.sendCommand("Input.dispatchKeyEvent", {
-        type,
-        key: "Enter",
-        code: "Enter",
-        windowsVirtualKeyCode: 13,
-        nativeVirtualKeyCode: 13,
-        unmodifiedText: "\r",
-        text: type === "char" ? "\r" : undefined,
-        modifiers,
-      });
-    }
-  });
+  ipcMain.handle("provider:submit-enter", (_event, provider) =>
+    service.submitProviderEnter(providerIdSchema.parse(provider)),
+  );
   ipcMain.handle("system-prompt:list", () => service.listSystemPrompts());
   ipcMain.handle("system-prompt:create", (_event, input) =>
     service.createSystemPrompt(systemPromptCreateSchema.parse(input)),

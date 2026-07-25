@@ -11,6 +11,42 @@ pnpm install
 pnpm dev
 ```
 
+## Autonomous Electron validation
+
+The local AI validation path launches a real Electron window against an
+isolated deterministic Mock Provider. It exercises visible controls with
+Playwright, checks layout geometry and the approved screenshot baseline, and
+never reads or writes the normal user profile.
+
+```powershell
+corepack pnpm test:ai
+```
+
+The command runs workspace type checks and Vitest, builds Electron, executes
+the Playwright Electron suite, and writes Markdown, JSON, JUnit and HTML
+results under `artifacts/ai-validation/<run-id>/`. Use `-- --skip-build` only
+when validating an already current local build. Screenshot baselines are
+updated separately with
+`corepack pnpm --filter @aihub/desktop test:ai:e2e:update` and must be reviewed.
+
+`corepack pnpm test:ai -- --real-providers` additionally runs the real-provider
+text-equivalence matrix over CDP port `9222`: background short answer, long
+answer, three contextual follow-ups, stop-and-resend, normalized website/body
+hash comparison, screenshots, DOM summaries and redacted transport timelines.
+Existing authenticated sessions run unattended. Logged-out ChatGPT or Claude
+sessions are recorded as `AuthBlocked`; login, CAPTCHA, QR-code and risk-control
+challenges are never bypassed. Use `AIHUB_CDP_PORT` to select a different port.
+
+Start the authenticated desktop instance with its loopback-only CDP port before
+running the real matrix:
+
+```powershell
+$env:AIHUB_CDP_PORT = "9222"
+pnpm dev
+# In another terminal:
+pnpm test:real-providers
+```
+
 ### Native Windows build
 
 The lightweight WebView2 + .NET implementation lives in `apps/windows-native`.
@@ -24,6 +60,24 @@ folder per provider.
 This project drives public website UI through semantic DOM adapters. It does
 not call private website APIs, bypass authentication challenges, or export
 authentication cookies.
+
+## Provider Regression
+
+For the reworked web-provider pipeline, use these docs when validating real provider sessions:
+
+- [Complete Validation Test Plan](./docs/validation-test-plan.md)
+- [Validation Test Run Template](./docs/validation-test-run-template.md)
+- [AI Autonomous UI and Interaction Validation](./docs/ai-autonomous-ui-validation-plan.md)
+- [Provider Web Regression Checklist](./docs/provider-web-regression-checklist.md)
+- [Provider Web Regression Result Template](./docs/provider-web-regression-template.md)
+
+Provider smoke helpers:
+
+- `pnpm smoke:provider -- -Provider chatgpt`
+- `pnpm smoke:watch -- -Provider chatgpt`
+- `pnpm smoke:matrix`
+- `pnpm smoke:matrix -- -Providers doubao,qianwen,yuanbao`
+- `pnpm smoke:summary`
 
 ## Current vertical slice
 

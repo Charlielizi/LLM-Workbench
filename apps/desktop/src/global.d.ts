@@ -1,17 +1,27 @@
 import type {
   AppSnapshot,
   AppSettingsPayload,
+  DataExportResult,
+  DataStorageSummary,
+  AdapterEventRecord,
   ComparisonSession,
   KnowledgeDocument,
   ConversationFolder,
   ConversationTag,
   NormalizedConversation,
+  ProviderConversationAnchor,
+  ProviderDebugSnapshot,
   ProviderEvent,
   ProviderId,
   ProviderMode,
+  ProviderSmokeInspection,
+  ProviderSmokeTestResult,
   OutgoingAttachment,
   SystemPrompt,
+  SettingsImportPreview,
   TransferPreview,
+  WebHistorySyncResult,
+  WebsiteConversationSnapshot,
 } from "@aihub/core";
 
 export interface AIHubApi {
@@ -73,6 +83,10 @@ export interface AIHubApi {
   setSettings(settings: AppSettingsPayload): Promise<void>;
   exportSettings(): Promise<string>;
   importSettings(json: string): Promise<AppSettingsPayload>;
+  previewSettingsImport(json: string): Promise<SettingsImportPreview>;
+  getStorageSummary(): Promise<DataStorageSummary>;
+  exportAllData(): Promise<DataExportResult>;
+  openDataFolder(): Promise<void>;
   openExternal(url: string): Promise<void>;
   searchConversations(query: string): Promise<NormalizedConversation[]>;
   pinConversation(conversationId: string, pinned: boolean): Promise<void>;
@@ -100,6 +114,24 @@ export interface AIHubApi {
   ): Promise<void>;
   setProviderLayout(width: number): Promise<void>;
   discoverProviderModels(provider: ProviderId): Promise<void>;
+  recoverProvider(provider: ProviderId): Promise<ProviderSummary>;
+  clearProviderSiteData(provider: ProviderId): Promise<ProviderSummary>;
+  submitProviderEnter(provider: ProviderId): Promise<void>;
+  captureProviderAnchor(provider: ProviderId): Promise<ProviderConversationAnchor>;
+  syncLatestProviderResponse(provider: ProviderId): Promise<boolean>;
+  syncWebHistory(provider: ProviderId): Promise<WebHistorySyncResult>;
+  getProviderDebugSnapshot(provider: ProviderId): Promise<ProviderDebugSnapshot>;
+  getProviderWebsiteSnapshot(provider: ProviderId): Promise<WebsiteConversationSnapshot>;
+  getLatestProviderSmokeResult(
+    provider: ProviderId,
+  ): Promise<ProviderSmokeTestResult | undefined>;
+  getProviderSmokeInspection(provider: ProviderId): Promise<ProviderSmokeInspection>;
+  listProviderAdapterEvents(
+    provider: ProviderId,
+    limit?: number,
+    sinceCreatedAt?: string,
+  ): Promise<AdapterEventRecord[]>;
+  setProviderCleanMode(provider: ProviderId, enabled: boolean): Promise<void>;
   listSystemPrompts(): Promise<SystemPrompt[]>;
   createSystemPrompt(input: {
     name: string;

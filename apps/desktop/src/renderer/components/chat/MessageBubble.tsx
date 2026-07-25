@@ -6,6 +6,7 @@ import { messageText } from "../../utils/message-text";
 import { MessageActions } from "./MessageActions";
 import { MessageContent } from "./MessageContent";
 import { MessageStatus } from "./MessageStatus";
+import { useI18n } from "../../i18n";
 
 export function MessageBubble({
   message,
@@ -14,6 +15,7 @@ export function MessageBubble({
   message: NormalizedMessage;
   retrySource?: NormalizedMessage;
 }) {
+  const { t } = useI18n();
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(() => messageText(message));
   const editAndResendMessage = useAppStore(
@@ -47,7 +49,13 @@ export function MessageBubble({
   }
 
   return (
-    <article className={`group relative ${isUser ? "self-end" : "self-start"} w-full`}>
+    <article
+      data-testid={`message-${message.id}`}
+      data-message-role={message.role}
+      data-message-status={message.status}
+      data-message-phase={message.statusPhase}
+      className={`group relative ${isUser ? "self-end" : "self-start"} w-full`}
+    >
       <div className={isUser ? "ml-auto max-w-[78%]" : "max-w-full"}>
         {!isUser && (
           <header className="mb-2 flex items-center gap-2 text-xs font-medium text-[var(--color-text-tertiary)]">
@@ -72,14 +80,14 @@ export function MessageBubble({
                   setEditing(false);
                 }}
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 className="interactive-chip rounded-full bg-[var(--color-send-bg)] px-3 py-1.5 text-sm font-medium text-[var(--color-send-text)] disabled:cursor-not-allowed disabled:opacity-40"
                 disabled={conversationBusy || !editText.trim()}
                 onClick={() => void submitEdit()}
               >
-                Save & resend
+                {t("message.saveAndResend")}
               </button>
             </div>
           </div>
@@ -89,7 +97,7 @@ export function MessageBubble({
               <MessageContent message={message} />
             </div>
             <div className="mt-1 flex justify-end pr-1 text-[11px] text-[var(--color-text-tertiary)]">
-              <span>You</span>
+              <span>{t("message.you")}</span>
               <span className="mx-1">·</span>
               <MessageStatus message={message} onRetry={retry} />
             </div>

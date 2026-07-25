@@ -1,5 +1,8 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  appSnapshotSchema,
   conversationPinSchema,
   conversationRenameSchema,
   conversationSearchSchema,
@@ -10,15 +13,51 @@ import {
   systemPromptCreateSchema,
   transferPreviewSchema,
   appSettingsSchema,
+  providerSmokeTestRequestSchema,
+  providerSmokeTestResultSchema,
   conversationBulkActionSchema,
   conversationSetDocumentsSchema,
   tagCreateSchema,
   providerEventSchema,
+  providerInteractionTargetSchema,
+  providerSubmitEvidenceSchema,
+  providerTextVerificationSchema,
+  providerTransportEventSchema,
+  providerAdapterEventsQuerySchema,
+  providerCleanModeSchema,
+  currentWebConversationSyncResultSchema,
   sendMessageSchema,
   transferConfirmSchema,
 } from "@aihub/core";
 
 describe("trusted IPC schemas", () => {
+  it("validates current website conversation sync results", () => {
+    expect(
+      currentWebConversationSyncResultSchema.parse({
+        provider: "chatgpt",
+        conversationId: "conversation",
+        created: true,
+        syncedMessages: 12,
+        partial: false,
+        syncedAt: "2026-07-25T12:00:00.000Z",
+      }),
+    ).toMatchObject({
+      provider: "chatgpt",
+      conversationId: "conversation",
+      syncedMessages: 12,
+    });
+    expect(() =>
+      currentWebConversationSyncResultSchema.parse({
+        provider: "unknown",
+        conversationId: "",
+        created: "yes",
+        syncedMessages: -1,
+        partial: false,
+        syncedAt: "today",
+      }),
+    ).toThrow();
+  });
+
   it("rejects unknown providers and empty messages", () => {
     expect(() =>
       sendMessageSchema.parse({
@@ -32,6 +71,54 @@ describe("trusted IPC schemas", () => {
         provider: "chatgpt",
         conversationId: "conversation",
         text: " ",
+      }),
+    ).toThrow();
+  });
+
+  it("validates provider adapter event query bounds", () => {
+    expect(
+      providerAdapterEventsQuerySchema.parse({
+        provider: "chatgpt",
+        limit: 25,
+      }),
+    ).toEqual({
+      provider: "chatgpt",
+      limit: 25,
+    });
+    expect(() =>
+      providerAdapterEventsQuerySchema.parse({
+        provider: "unknown",
+        limit: 25,
+      }),
+    ).toThrow();
+    expect(() =>
+      providerAdapterEventsQuerySchema.parse({
+        provider: "chatgpt",
+        limit: 501,
+      }),
+    ).toThrow();
+  });
+
+  it("validates clean mode commands without coercing booleans", () => {
+    expect(
+      providerCleanModeSchema.parse({
+        provider: "chatgpt",
+        enabled: false,
+      }),
+    ).toEqual({
+      provider: "chatgpt",
+      enabled: false,
+    });
+    expect(() =>
+      providerCleanModeSchema.parse({
+        provider: "chatgpt",
+        enabled: "false",
+      }),
+    ).toThrow();
+    expect(() =>
+      providerCleanModeSchema.parse({
+        provider: "unknown",
+        enabled: true,
       }),
     ).toThrow();
   });
@@ -122,6 +209,17 @@ describe("trusted IPC schemas", () => {
     ).toThrow();
   });
 
+  it("keeps provider network monitoring away from response body parsing", () => {
+    const preload = readFileSync(
+      path.join(import.meta.dirname, "..", "src", "provider-preload.ts"),
+      "utf8",
+    );
+
+    expect(preload).not.toContain("response.clone()");
+    expect(preload).not.toContain(".getReader()");
+    expect(preload).not.toContain("reader.read()");
+  });
+
   it("accepts provider-completed messages with captured provider html", () => {
     const parsed = providerEventSchema.parse({
       type: "message.completed",
@@ -175,6 +273,220 @@ describe("trusted IPC schemas", () => {
       type: "math",
       tex: "x^2+y^2",
     });
+  });
+
+  it("accepts provider generation failures tied to a provider message id", () => {
+    const parsed = providerEventSchema.parse({
+      type: "generation.failed",
+      messageId: "provider-message",
+      code: "provider_response_not_detected",
+      recoverable: true,
+      phase: "waiting-first-token",
+      detail: "No assistant response was detected.",
+    });
+
+    expect(parsed).toMatchObject({
+      type: "generation.failed",
+      messageId: "provider-message",
+      code: "provider_response_not_detected",
+    });
+  });
+
+  it("validates structured provider debug completion signals", () => {
+    const event = {
+      type: "provider.debug-snapshot",
+      snapshot: {
+        provider: "chatgpt",
+        url: "https://chatgpt.com/c/123",
+        composer: "textarea visible=true text=0",
+        submit: "button visible=true text=4",
+        anchor: "div:assistant:3",
+        assistant: "div visible=true text=42",
+        activeMessageId: "provider-message",
+        assistantBinding: "bound-after-anchor:3->4",
+        latestTextLength: 42,
+        isGenerating: false,
+        networkActiveCount: 0,
+        networkIdle: true,
+        lastNetworkUrl: "https://chatgpt.com/backend-api/conversation",
+        lastMutationAt: 123,
+        completionDecision: "complete text=42 stop=false streaming=false network=idle",
+        completionSignals: {
+          textLength: 42,
+          hasStopButton: false,
+          hasStreamingIndicator: false,
+          networkIdle: true,
+          hasRecoverableBlocker: false,
+          recoverableBlockerReason: undefined,
+          stableMs: 3000,
+          elapsedMs: 5000,
+        },
+        fallbackUsed: false,
+      },
+    };
+
+    expect(providerEventSchema.parse(event)).toMatchObject(event);
+    expect(() =>
+      providerEventSchema.parse({
+        ...event,
+        snapshot: {
+          ...event.snapshot,
+          completionSignals: undefined,
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("accepts provider summaries with optional failure diagnostics", () => {
+    expect(appSnapshotSchema.parse({
+      providers: [{
+        id: "chatgpt",
+        authenticated: false,
+        ready: false,
+        degraded: false,
+        reason: "Login required",
+        lastFailurePhase: "checking-auth",
+        lastFailureCode: "auth_required",
+        websiteVisible: true,
+      }],
+      conversations: [],
+      comparisons: [],
+    }).providers[0]).toMatchObject({
+      id: "chatgpt",
+      lastFailurePhase: "checking-auth",
+      lastFailureCode: "auth_required",
+    });
+  });
+
+  it("validates provider smoke request and result payloads", () => {
+    expect(
+      providerSmokeTestRequestSchema.parse({
+        provider: "chatgpt",
+        scenario: "manual-recovery",
+        targetRuntimeInstanceId: "runtime-123",
+      }),
+    ).toMatchObject({
+      provider: "chatgpt",
+      scenario: "manual-recovery",
+    });
+    expect(() =>
+      providerSmokeTestRequestSchema.parse({
+        provider: "unknown",
+      }),
+    ).toThrow();
+    expect(
+      providerSmokeTestRequestSchema.parse({
+        provider: "doubao",
+        scenario: "background-send",
+      }),
+    ).toMatchObject({
+      provider: "doubao",
+      scenario: "background-send",
+    });
+
+    const now = new Date().toISOString();
+    expect(
+      providerSmokeTestResultSchema.parse({
+        provider: "chatgpt",
+        scenario: "manual-recovery",
+        token: "AIHUB_CHATGPT_123",
+        sendError: null,
+        assistantMessage: {
+          id: "assistant",
+          conversationId: "conversation",
+          role: "assistant",
+          content: [{ type: "text", text: "done" }],
+          status: "completed",
+          statusPhase: "completed",
+          provider: "chatgpt",
+          createdAt: now,
+        },
+        diagnostics: {
+          providerSummary: {
+            id: "chatgpt",
+            authenticated: true,
+            ready: true,
+            degraded: false,
+            websiteVisible: true,
+          },
+          debugSnapshot: {
+            provider: "chatgpt",
+            url: "https://chatgpt.com/c/123",
+            composer: "textarea",
+            submit: "button",
+            anchor: "div:3",
+            assistant: "div:4",
+            latestTextLength: 4,
+            isGenerating: false,
+            networkActiveCount: 0,
+            networkIdle: true,
+            lastMutationAt: 10,
+            completionDecision: "complete",
+            completionSignals: {
+              textLength: 4,
+              hasStopButton: false,
+              hasStreamingIndicator: false,
+              networkIdle: true,
+              hasRecoverableBlocker: false,
+              stableMs: 100,
+              elapsedMs: 200,
+            },
+            fallbackUsed: false,
+          },
+          adapterEvents: [{
+            id: 1,
+            provider: "chatgpt",
+            type: "provider.network-idle",
+            createdAt: now,
+          }],
+        },
+      }),
+    ).toMatchObject({
+      provider: "chatgpt",
+      scenario: "manual-recovery",
+    });
+    expect(() =>
+      providerSmokeTestResultSchema.parse({
+        provider: "chatgpt",
+        diagnostics: {
+          adapterEvents: [{
+            id: -1,
+            provider: "chatgpt",
+            type: "provider.network-idle",
+            createdAt: now,
+          }],
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects malformed app snapshots from the trusted bridge", () => {
+    expect(() =>
+      appSnapshotSchema.parse({
+        providers: [{
+          id: "chatgpt",
+          authenticated: false,
+          ready: false,
+          degraded: false,
+          websiteVisible: "yes",
+        }],
+        conversations: [],
+        comparisons: [],
+      }),
+    ).toThrow();
+    expect(() =>
+      appSnapshotSchema.parse({
+        providers: [],
+        conversations: [],
+        comparisons: [{
+          id: "session",
+          title: "Compare",
+          participants: [{ conversationId: "conversation", provider: "unknown" }],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }],
+      }),
+    ).toThrow();
   });
 
   it("bounds transfer payload size", () => {
@@ -263,6 +575,76 @@ describe("trusted IPC schemas", () => {
       }),
     ).toThrow();
     expect(appSettingsSchema.parse({ theme: "system" }).theme).toBe("system");
+    expect(
+      appSettingsSchema.parse({
+        providerBackends: { chatgpt: "api" },
+        providerApiConfigs: {
+          chatgpt: {
+            enabled: true,
+            baseUrl: "https://api.openai.com/v1",
+            model: "gpt-4.1",
+          },
+        },
+      }).providerApiConfigs?.chatgpt?.model,
+    ).toBe("gpt-4.1");
+    expect(() =>
+      appSettingsSchema.parse({
+        providerApiConfigs: {
+          chatgpt: {
+            baseUrl: "not-a-url",
+          },
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("validates trusted interaction and redacted transport evidence", () => {
+    expect(providerInteractionTargetSchema.parse({
+      action: "composer",
+      inputMethod: "text",
+      x: 120,
+      y: 300,
+      width: 480,
+      height: 64,
+      elementType: "contenteditable",
+      fingerprint: "fnv1a-12345678",
+    }).action).toBe("composer");
+    expect(providerTextVerificationSchema.parse({
+      matched: true,
+      actualLength: 12,
+      expectedLength: 12,
+      actualHash: "fnv1a-a",
+      expectedHash: "fnv1a-a",
+      fingerprint: "fnv1a-target",
+    }).matched).toBe(true);
+    expect(providerSubmitEvidenceSchema.parse({
+      confirmed: true,
+      userTurnSeen: false,
+      transportSeen: true,
+      assistantStarted: false,
+      sessionCreated: false,
+      retryAllowed: false,
+    }).transportSeen).toBe(true);
+    expect(providerTransportEventSchema.parse({
+      requestId: "42",
+      phase: "completed",
+      urlPath: "https://chat.example/completion",
+      method: "POST",
+      statusCode: 200,
+      durationMs: 450,
+      resourceType: "sharedWorker",
+      uploadBytes: 128,
+      uploadHash: "sha256-redacted",
+      markerObserved: true,
+    }).resourceType).toBe("sharedWorker");
+    const stripped = providerTransportEventSchema.parse({
+      requestId: "42",
+      phase: "completed",
+      urlPath: "https://chat.example/completion",
+      method: "POST",
+      requestHeaders: { cookie: "secret" },
+    });
+    expect(stripped).not.toHaveProperty("requestHeaders");
   });
 
 });

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { NormalizedConversation } from "@aihub/core";
+import { useI18n } from "../../i18n";
 import { MessageBubble } from "./MessageBubble";
 
 const AUTO_SCROLL_THRESHOLD_PX = 80;
@@ -9,6 +10,7 @@ export function MessageList({
 }: {
   conversation: NormalizedConversation;
 }) {
+  const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
   const previousConversationIdRef = useRef(conversation.id);
@@ -36,14 +38,15 @@ export function MessageList({
 
   return (
     <div
+      data-testid="message-list"
       ref={containerRef}
       className="min-h-0 overflow-y-auto px-6"
       onScroll={updateAutoScrollState}
     >
-      <div className="mx-auto flex w-full max-w-[860px] flex-col gap-7 pb-8 pt-4">
+      <div className="mx-auto flex w-full max-w-[var(--content-max-width)] flex-col gap-7 pb-8 pt-4">
         {conversation.messages.length === 0 ? (
           <p className="py-20 text-center text-sm text-[var(--color-text-tertiary)]">
-            Start the conversation.
+            {t("chat.startConversation")}
           </p>
         ) : (
           conversation.messages.map((message, index) => {

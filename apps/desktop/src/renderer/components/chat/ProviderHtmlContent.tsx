@@ -4,10 +4,15 @@ import { renderProviderHtml } from "../../utils/provider-html";
 
 export function ProviderHtmlContent({
   html,
+  suppressImages = false,
 }: {
   html: string;
+  suppressImages?: boolean;
 }) {
-  const sanitizedHtml = useMemo(() => renderProviderHtml(html), [html]);
+  const sanitizedHtml = useMemo(
+    () => renderProviderHtml(html, suppressImages),
+    [html, suppressImages],
+  );
 
   return (
     <div

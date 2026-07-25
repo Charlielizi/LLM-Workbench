@@ -19,7 +19,8 @@ import type {
 import { useAppStore } from "../../stores/app-store";
 import { useComposerStore } from "../../stores/composer-store";
 import { useToastStore } from "../../stores/toast-store";
-import { formatTokenCount } from "../../utils/token-estimate";
+import { useI18n } from "../../i18n";
+import { estimateTokens } from "../../utils/token-estimate";
 import { shouldShowAttachmentControl } from "../../utils/provider-capabilities";
 
 const EMPTY_MODES: ProviderMode[] = [];
@@ -29,6 +30,7 @@ export function Composer({
 }: {
   conversation: NormalizedConversation;
 }) {
+  const { t, locale } = useI18n();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [attachments, setAttachments] = useState<File[]>([]);
@@ -66,6 +68,14 @@ export function Composer({
     state.streamingConversations.has(conversation.id),
   );
   const text = drafts[conversation.id] ?? "";
+  const latestRecoverableMessage = [...conversation.messages]
+    .reverse()
+    .find((message) =>
+      message.role === "user" && (
+        message.statusPhase === "recoverable-blocked" ||
+        message.errorCode === "auth_required"
+      ),
+    );
   const configuredModes =
     providerDefinitions[conversation.provider].modeDefinitions;
   const providerModes = liveCapabilities?.modes.length
@@ -117,7 +127,7 @@ export function Composer({
       ].slice(0, 10);
     });
     if (files.length !== incoming.length) {
-      addToast("Ignored attachments larger than 25 MB.", "warning", 4000);
+      addToast(t("chat.attachmentTooLarge"), "warning", 4000);
     }
   }
 
@@ -134,7 +144,7 @@ export function Composer({
       }];
     });
     if (outgoing.length !== attachments.length) {
-      addToast("Some attachments could not be resolved to local paths.", "error", 5000);
+      addToast(t("chat.attachmentPathFailed"), "error", 5000);
       return;
     }
     if (
@@ -152,6 +162,7 @@ export function Composer({
 
   return (
     <div
+      data-testid="composer"
       className="px-6 pb-6 pt-2"
       onDragEnter={(event) => {
         event.preventDefault();
@@ -169,10 +180,77 @@ export function Composer({
         addFiles(event.dataTransfer.files);
       }}
     >
-      <div className="mx-auto w-[min(860px,calc(100%-48px))]">
+      <div className="mx-auto w-full max-w-[var(--content-max-width)]">
         {error && (
           <div className="mb-2 rounded-2xl border border-[var(--color-danger-bg)] bg-[var(--color-danger-bg)] px-3 py-2 text-xs text-[var(--color-danger-text)]">
             {error}
+          </div>
+        )}
+        {latestRecoverableMessage && (
+          <div className="mb-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-soft)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">
+            <div className="font-medium text-[var(--color-text-primary)]">
+              {latestRecoverableMessage.statusPhase === "recoverable-blocked"
+                ? t("chat.providerActionRequired")
+                : t("chat.providerSignInRequired")}
+            </div>
+            <div className="mt-1">
+              {latestRecoverableMessage.statusDetail ??
+                (latestRecoverableMessage.statusPhase === "recoverable-blocked"
+                  ? t("message.status.openToSubmit")
+                  : t("message.status.openToSignIn"))}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                className="interactive-chip rounded-full border border-[var(--color-border)] bg-[var(--color-bg-elevated)] px-3 py-1 text-[11px] text-[var(--color-text-primary)]"
+                onClick={() =>
+                  void window.aihub.setProviderWebsiteVisible(
+                    conversation.provider,
+                    true,
+                  )
+                }
+              >
+                {t("chat.openProvider")}
+              </button>
+              <button
+                className="interactive-chip rounded-full border border-[var(--color-border)] bg-[var(--color-bg-elevated)] px-3 py-1 text-[11px] text-[var(--color-text-primary)]"
+                onClick={() =>
+                  void window.aihub.submitProviderEnter(conversation.provider)
+                    .then(() => {
+                      addToast(t("chat.submittedInProvider"), "success");
+                    })
+                    .catch((cause) => {
+                      addToast(
+                        cause instanceof Error ? cause.message : String(cause),
+                        "error",
+                      );
+                    })
+                }
+              >
+                {t("provider.submit")}
+              </button>
+              <button
+                className="interactive-chip rounded-full border border-[var(--color-border)] bg-[var(--color-bg-elevated)] px-3 py-1 text-[11px] text-[var(--color-text-primary)]"
+                onClick={() =>
+                  void window.aihub.syncLatestProviderResponse(conversation.provider)
+                    .then((recovered) => {
+                      addToast(
+                        recovered
+                          ? t("chat.recoveredReply")
+                          : t("chat.noNewReply"),
+                        recovered ? "success" : "warning",
+                      );
+                    })
+                    .catch((cause) => {
+                      addToast(
+                        cause instanceof Error ? cause.message : String(cause),
+                        "error",
+                      );
+                    })
+                }
+              >
+                {t("provider.resync")}
+              </button>
+            </div>
           </div>
         )}
         <div
@@ -184,7 +262,7 @@ export function Composer({
         >
           {dragging && (
             <div className="pointer-events-none absolute inset-2 z-10 grid place-items-center rounded-[1.4rem] border border-dashed border-[var(--color-border-strong)] bg-[var(--color-bg-glass-strong)] text-sm text-[var(--color-text-secondary)]">
-              Drop files to attach
+              {t("chat.attach")}
             </div>
           )}
 
@@ -225,10 +303,13 @@ export function Composer({
           )}
 
           <textarea
+            data-testid="composer-input"
             ref={textareaRef}
             className="block max-h-[220px] min-h-[88px] w-full resize-none overflow-y-auto border-0 bg-transparent px-2 pb-3 pt-2 text-[15px] leading-7 outline-none placeholder:text-[var(--color-text-tertiary)]"
             value={text}
-            placeholder={`Message ${PROVIDER_LABELS[conversation.provider]}`}
+            placeholder={t("chat.messagePlaceholder", {
+              provider: PROVIDER_LABELS[conversation.provider],
+            })}
             onChange={(event) => setDraft(conversation.id, event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
@@ -252,14 +333,14 @@ export function Composer({
               />
               {showAttachmentControl && (
                 <IconChip
-                  title="Attach files"
+                  title={t("chat.attach")}
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <Paperclip size={15} />
                 </IconChip>
               )}
               <IconChip
-                title="System prompt"
+                title={t("chat.systemPrompt")}
                 onClick={() => setSystemPromptModalOpen(true)}
               >
                 <Sparkles size={15} />
@@ -297,7 +378,7 @@ export function Composer({
                   onChange={(event) =>
                     setModel(conversation.id, event.target.value || undefined)
                   }
-                  aria-label="Select model"
+                  aria-label={t("chat.selectModel")}
                 >
                   {liveCapabilities.models.map((model) => (
                     <option key={model.id} value={model.id}>
@@ -308,24 +389,33 @@ export function Composer({
               )}
 
               <span className="min-w-0 truncate">
-                {formatTokenCount(text) || "Enter to send · Shift+Enter for newline"}
+                {text
+                  ? t("chat.tokenCount", {
+                      count: text.length.toLocaleString(locale),
+                      tokens: estimateTokens(text).toLocaleString(locale),
+                    })
+                  : t("chat.sendHint")}
               </span>
             </div>
 
             {streaming ? (
               <button
+                data-testid="stop-generation"
                 className="interactive-chip grid size-11 place-items-center rounded-full border border-[var(--color-border)] bg-[var(--color-bg-elevated)] text-[var(--color-text-primary)]"
                 onClick={() => void cancelGeneration(conversation.provider)}
-                aria-label="Stop generation"
+                aria-label={t("chat.stop")}
+                title={t("chat.stop")}
               >
                 <Square size={15} fill="currentColor" />
               </button>
             ) : (
               <button
+                data-testid="send-message"
                 className="interactive-chip grid size-11 place-items-center rounded-full bg-[var(--color-send-bg)] text-[var(--color-send-text)] shadow-[var(--shadow-sm)] disabled:cursor-not-allowed disabled:opacity-40"
                 disabled={conversationBusy || (!text.trim() && !attachments.length)}
                 onClick={() => void send()}
-                aria-label="Send message"
+                aria-label={t("chat.send")}
+                title={t("chat.send")}
               >
                 <Send size={16} />
               </button>

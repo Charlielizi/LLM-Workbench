@@ -49,9 +49,22 @@
   --sidebar-width: 270px;
   --menubar-height: 40px;
   --topbar-height: 44px;
+  --content-max-width: 860px;
   --font-sans: Inter, "Segoe UI", "Microsoft YaHei", system-ui, -apple-system,
     sans-serif;
   --font-mono: "Cascadia Code", Consolas, "SF Mono", monospace;
+}
+
+[data-content-width="narrow"] {
+  --content-max-width: 760px;
+}
+
+[data-content-width="standard"] {
+  --content-max-width: 860px;
+}
+
+[data-content-width="wide"] {
+  --content-max-width: 1040px;
 }
 
 [data-theme="light"] {

@@ -3,6 +3,16 @@ import { describe, expect, it } from "vitest";
 import { renderProviderHtml } from "../src/renderer/utils/provider-html";
 
 describe("renderProviderHtml", () => {
+  it("suppresses inline images when structured image blocks render them", () => {
+    const html = renderProviderHtml(
+      '<p>answer</p><picture><img src="https://example.com/image.png"></picture>',
+      true,
+    );
+    expect(html).toContain("answer");
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("<picture");
+  });
+
   it("removes unsafe tags and event handlers", () => {
     const html = renderProviderHtml(
       "<div onclick='alert(1)'><script>alert(1)</script><a href='javascript:alert(1)'>x</a></div>",

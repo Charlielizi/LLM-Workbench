@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { NormalizedConversation, NormalizedMessage } from "@aihub/core";
-import { conversationSnapshotSignature } from "../src/renderer/utils/snapshot-signature";
+import {
+  appSnapshotMetadataSignature,
+  conversationSnapshotSignature,
+} from "../src/renderer/utils/snapshot-signature";
 
 function message(overrides: Partial<NormalizedMessage> = {}): NormalizedMessage {
   return {
@@ -55,5 +58,41 @@ describe("conversationSnapshotSignature", () => {
     );
 
     expect(after).not.toBe(before);
+  });
+
+  it("changes when website synchronization state changes", () => {
+    const before = conversationSnapshotSignature(
+      conversation({ syncStatus: "syncing" }),
+    );
+    const after = conversationSnapshotSignature(
+      conversation({
+        syncStatus: "error",
+        syncError: "Provider page unavailable",
+      }),
+    );
+
+    expect(after).not.toBe(before);
+  });
+});
+
+describe("appSnapshotMetadataSignature", () => {
+  it("changes when provider website visibility changes", () => {
+    const provider = {
+      id: "chatgpt" as const,
+      authenticated: true,
+      ready: true,
+      degraded: false,
+      websiteVisible: false,
+    };
+    const hidden = appSnapshotMetadataSignature({
+      providers: [provider],
+      comparisons: [],
+    });
+    const visible = appSnapshotMetadataSignature({
+      providers: [{ ...provider, websiteVisible: true }],
+      comparisons: [],
+    });
+
+    expect(visible).not.toBe(hidden);
   });
 });

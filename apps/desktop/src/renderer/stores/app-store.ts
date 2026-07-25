@@ -15,14 +15,31 @@ import type {
 } from "@aihub/core";
 import { PROVIDER_IDS, PROVIDER_LABELS } from "@aihub/core";
 import { useToastStore } from "./toast-store";
-import { conversationSnapshotSignature } from "../utils/snapshot-signature";
+import {
+  appSnapshotMetadataSignature,
+  conversationSnapshotSignature,
+} from "../utils/snapshot-signature";
 import { messageText } from "../utils/message-text";
+import { translate } from "../i18n";
+import { resolveLocale, useSettingsStore } from "./settings-store";
 
 const emptySnapshot: AppSnapshot = {
   providers: [],
   conversations: [],
   comparisons: [],
 };
+
+export type WorkspaceView = "conversation" | "comparison" | "settings";
+export type SettingsSection =
+  | "general"
+  | "appearance"
+  | "providers"
+  | "conversations"
+  | "prompts"
+  | "knowledge"
+  | "shortcuts"
+  | "data"
+  | "about";
 
 export interface AppState {
   snapshot: AppSnapshot;
@@ -41,7 +58,10 @@ export interface AppState {
   systemPromptModalOpen: boolean;
   comparisonSetupOpen: boolean;
   activeComparisonId: string | undefined;
-  settingsModalOpen: boolean;
+  workspaceView: WorkspaceView;
+  previousWorkspaceView: Exclude<WorkspaceView, "settings">;
+  providerBeforeSettings: ProviderId | undefined;
+  settingsSection: SettingsSection;
   documents: KnowledgeDocument[];
   folders: ConversationFolder[];
   tags: ConversationTag[];
@@ -53,7 +73,9 @@ export interface AppState {
   setSystemPromptModalOpen: (open: boolean) => void;
   setComparisonSetupOpen: (open: boolean) => void;
   setActiveComparison: (id: string | undefined) => void;
-  setSettingsModalOpen: (open: boolean) => void;
+  openSettings: (section?: SettingsSection) => void;
+  closeSettings: () => void;
+  setSettingsSection: (section: SettingsSection) => void;
   createComparison: (providers: ProviderId[]) => Promise<void>;
   sendComparison: (sessionId: string, text: string) => Promise<boolean>;
   refreshSystemPrompts: () => Promise<void>;
@@ -64,23 +86,23 @@ export interface AppState {
     provider?: ProviderId;
     isDefault: boolean;
   }) => Promise<boolean>;
-  deleteSystemPrompt: (id: string) => Promise<void>;
+  deleteSystemPrompt: (id: string) => Promise<boolean>;
   setConversationSystemPrompt: (
     conversationId: string,
     systemPromptId?: string,
   ) => Promise<void>;
   refreshLibraryData: () => Promise<void>;
   addDocument: () => Promise<void>;
-  removeDocument: (id: string) => Promise<void>;
+  removeDocument: (id: string) => Promise<boolean>;
   setConversationDocuments: (
     conversationId: string,
     documentIds: string[],
   ) => Promise<void>;
-  createFolder: (name: string, parentId?: string) => Promise<void>;
+  createFolder: (name: string, parentId?: string) => Promise<boolean>;
   renameFolder: (id: string, name: string) => Promise<void>;
-  deleteFolder: (id: string) => Promise<void>;
-  createTag: (name: string, color: string) => Promise<void>;
-  deleteTag: (id: string) => Promise<void>;
+  deleteFolder: (id: string) => Promise<boolean>;
+  createTag: (name: string, color: string) => Promise<boolean>;
+  deleteTag: (id: string) => Promise<boolean>;
   setConversationFolder: (
     conversationId: string,
     folderId?: string,
@@ -107,21 +129,21 @@ export interface AppState {
           conversationIds: string[];
           targetProvider: ProviderId;
         }
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   initialize: () => Promise<void>;
   dispose: () => void;
   createConversation: (provider: ProviderId) => Promise<void>;
   searchConversations: (query: string) => Promise<void>;
   pinConversation: (conversationId: string, pinned: boolean) => Promise<void>;
   renameConversation: (conversationId: string, title: string) => Promise<void>;
-  deleteConversation: (conversationId: string) => Promise<void>;
+  deleteConversation: (conversationId: string) => Promise<boolean>;
   sendMessage: (input: {
     text: string;
     attachments?: OutgoingAttachment[];
     modes?: ProviderMode[];
     model?: string;
   }) => Promise<boolean>;
-  deleteMessage: (conversationId: string, messageId: string) => Promise<void>;
+  deleteMessage: (conversationId: string, messageId: string) => Promise<boolean>;
   editAndResendMessage: (
     conversationId: string,
     messageId: string,
@@ -157,13 +179,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   systemPromptModalOpen: false,
   comparisonSetupOpen: false,
   activeComparisonId: undefined,
-  settingsModalOpen: false,
+  workspaceView: "conversation",
+  previousWorkspaceView: "conversation",
+  providerBeforeSettings: undefined,
+  settingsSection: "general",
   documents: [],
   folders: [],
   tags: [],
 
   selectConversation: (id) => {
-    set({ selectedConversationId: id });
+    set({ selectedConversationId: id, workspaceView: "conversation" });
     void window.aihub.selectConversation(id);
   },
   setBusy: (busy) => set({ busy }),
@@ -174,8 +199,44 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ systemPromptModalOpen }),
   setComparisonSetupOpen: (comparisonSetupOpen) =>
     set({ comparisonSetupOpen }),
-  setActiveComparison: (activeComparisonId) => set({ activeComparisonId }),
-  setSettingsModalOpen: (settingsModalOpen) => set({ settingsModalOpen }),
+  setActiveComparison: (activeComparisonId) =>
+    set({
+      activeComparisonId,
+      workspaceView: activeComparisonId ? "comparison" : "conversation",
+    }),
+  openSettings: (settingsSection = get().settingsSection) => {
+    const current = get().workspaceView;
+    const visibleProvider = get().snapshot.providers.find(
+      (provider) => provider.websiteVisible,
+    );
+    if (visibleProvider) {
+      void window.aihub.setProviderWebsiteVisible(visibleProvider.id, false);
+    }
+    set({
+      workspaceView: "settings",
+      previousWorkspaceView:
+        current === "settings" ? get().previousWorkspaceView : current,
+      providerBeforeSettings:
+        current === "settings"
+          ? get().providerBeforeSettings
+          : visibleProvider?.id,
+      settingsSection,
+    });
+  },
+  closeSettings: () => {
+    const state = get();
+    set({
+      workspaceView: state.previousWorkspaceView,
+      providerBeforeSettings: undefined,
+    });
+    if (state.providerBeforeSettings) {
+      void window.aihub.setProviderWebsiteVisible(
+        state.providerBeforeSettings,
+        true,
+      );
+    }
+  },
+  setSettingsSection: (settingsSection) => set({ settingsSection }),
 
   initialize: async () => {
     const version = ++initializationVersion;
@@ -225,7 +286,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         );
         if (
           currentSignatures.length === nextSignatures.length &&
-          currentSignatures.every((value, index) => value === nextSignatures[index])
+          currentSignatures.every((value, index) => value === nextSignatures[index]) &&
+          appSnapshotMetadataSignature(currentSnapshot) ===
+            appSnapshotMetadataSignature(nextSnapshot)
         ) {
           return;
         }
@@ -291,21 +354,49 @@ export const useAppStore = create<AppState>((set, get) => ({
     unsubscribeProviderEvent = window.aihub.onProviderEvent(
       (provider, event) => {
         const label = PROVIDER_LABELS[provider];
+        const locale = useSettingsStore.getState().locale;
         if (event.type === "auth.changed") {
           useToastStore.getState().addToast(
             event.authenticated
-              ? `${label} authenticated`
-              : `${label} authentication expired`,
+              ? translate(locale, "provider.event.authenticated", {
+                  provider: label,
+                })
+              : translate(locale, "provider.event.expired", {
+                  provider: label,
+                }),
             event.authenticated ? "success" : "warning",
           );
         } else if (event.type === "adapter.degraded") {
           useToastStore
             .getState()
-            .addToast(`${label} adapter needs recovery: ${event.reason}`, "error", 7000);
+            .addToast(
+              translate(locale, "provider.event.recovery", {
+                provider: label,
+                reason: event.reason,
+              }),
+              "error",
+              7000,
+            );
         } else if (event.type === "generation.failed") {
+          const chinese = resolveLocale(locale) === "zh-CN";
+          const detail = event.detail
+            ? `${chinese ? "：" : ": "}${event.detail}`
+            : "";
+          const phase = event.phase
+            ? `${chinese ? "（" : " ("}${event.phase}${chinese ? "）" : ")"}`
+            : "";
           useToastStore
             .getState()
-            .addToast(`${label} generation failed: ${event.code}`, "error");
+            .addToast(
+              translate(locale, "provider.event.generationFailed", {
+                provider: label,
+                phase,
+                code: event.code,
+                detail,
+              }),
+              "error",
+              7000,
+            );
         } else if (event.type === "capabilities.changed") {
           set((state) => ({
             providerCapabilities: {
@@ -362,8 +453,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       await window.aihub.removeDocument(id);
       set({ documents: await window.aihub.listDocuments() });
+      return true;
     } catch (cause) {
       useToastStore.getState().addToast(errorText(cause), "error");
+      return false;
     }
   },
 
@@ -382,8 +475,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       await window.aihub.createFolder(name, parentId ?? null);
       set({ folders: await window.aihub.listFolders() });
+      return true;
     } catch (cause) {
       useToastStore.getState().addToast(errorText(cause), "error");
+      return false;
     }
   },
 
@@ -400,8 +495,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       await window.aihub.deleteFolder(id);
       set({ folders: await window.aihub.listFolders() });
+      return true;
     } catch (cause) {
       useToastStore.getState().addToast(errorText(cause), "error");
+      return false;
     }
   },
 
@@ -409,8 +506,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       await window.aihub.createTag(name, color);
       set({ tags: await window.aihub.listTags() });
+      return true;
     } catch (cause) {
       useToastStore.getState().addToast(errorText(cause), "error");
+      return false;
     }
   },
 
@@ -418,8 +517,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       await window.aihub.deleteTag(id);
       set({ tags: await window.aihub.listTags() });
+      return true;
     } catch (cause) {
       useToastStore.getState().addToast(errorText(cause), "error");
+      return false;
     }
   },
 
@@ -446,8 +547,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ busy: true });
     try {
       await window.aihub.bulkConversationAction(input);
+      return true;
     } catch (cause) {
       useToastStore.getState().addToast(errorText(cause), "error");
+      return false;
     } finally {
       set({ busy: false });
     }
@@ -460,6 +563,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({
         activeComparisonId: session.id,
         comparisonSetupOpen: false,
+        workspaceView: "comparison",
       });
     } catch (cause) {
       useToastStore.getState().addToast(errorText(cause), "error");
@@ -516,8 +620,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       await window.aihub.deleteSystemPrompt(id);
       set({ systemPrompts: await window.aihub.listSystemPrompts() });
+      return true;
     } catch (cause) {
       useToastStore.getState().addToast(errorText(cause), "error");
+      return false;
     }
   },
 
@@ -595,8 +701,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           (conversation) => conversation.id !== conversationId,
         ),
       }));
+      return true;
     } catch (cause) {
       useToastStore.getState().addToast(errorText(cause), "error");
+      return false;
     }
   },
 
@@ -674,8 +782,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   deleteMessage: async (conversationId, messageId) => {
     try {
       await window.aihub.deleteMessage(conversationId, messageId);
+      return true;
     } catch (cause) {
       useToastStore.getState().addToast(errorText(cause), "error");
+      return false;
     }
   },
 
@@ -778,7 +888,7 @@ export function blockText(
   conversation: NormalizedConversation,
 ): string {
   const latest = conversation.messages.at(-1);
-  return latest ? messageText(latest).slice(0, 72) : "鐏忔碍妫ゅ☉鍫熶紖";
+  return latest ? messageText(latest).slice(0, 72) : "";
 }
 
 export function messagePreview(message: NormalizedMessage): string {

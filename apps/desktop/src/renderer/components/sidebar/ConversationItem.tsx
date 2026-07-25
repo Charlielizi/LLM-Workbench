@@ -7,6 +7,7 @@ import {
   useSelectedConversation,
 } from "../../stores/app-store";
 import { ConversationContextMenu } from "./ConversationContextMenu";
+import { useI18n } from "../../i18n";
 
 export function ConversationItem({
   conversation,
@@ -19,6 +20,7 @@ export function ConversationItem({
   selected?: boolean;
   onToggleSelection?: (id: string) => void;
 }) {
+  const { t } = useI18n();
   const [menu, setMenu] = useState<{ x: number; y: number }>();
   const selected = useSelectedConversation();
   const selectConversation = useAppStore(
@@ -39,6 +41,9 @@ export function ConversationItem({
   return (
     <>
       <button
+        data-testid={`conversation-item-${conversation.id}`}
+        data-provider={conversation.provider}
+        aria-current={active ? "page" : undefined}
         className={`group mb-0.5 w-full rounded-xl px-3 py-1.5 text-left transition ${
           active
             ? "bg-[var(--color-bg-elevated)] shadow-[var(--shadow-sm)]"
@@ -72,6 +77,32 @@ export function ConversationItem({
           <span className="min-w-0 flex-1 truncate text-[13px] leading-6">
             {conversation.title}
           </span>
+          {conversation.syncStatus &&
+            conversation.syncStatus !== "synced" &&
+            conversation.syncStatus !== "not-synced" && (
+              <i
+                title={
+                  conversation.syncError ??
+                  t("conversation.syncStatus", {
+                    status:
+                      conversation.syncStatus === "syncing"
+                        ? t("conversation.sync.syncing")
+                        : conversation.syncStatus === "partial"
+                          ? t("conversation.sync.partial")
+                          : conversation.syncStatus === "remote-missing"
+                            ? t("conversation.sync.remoteMissing")
+                            : t("conversation.sync.error"),
+                  })
+                }
+                className={`size-1.5 shrink-0 rounded-full ${
+                  conversation.syncStatus === "syncing"
+                    ? "animate-pulse bg-blue-400"
+                    : conversation.syncStatus === "remote-missing"
+                      ? "bg-amber-400"
+                      : "bg-red-400"
+                }`}
+              />
+            )}
           {streaming && (
             <i className="size-1.5 shrink-0 animate-pulse rounded-full bg-[var(--color-text-primary)]" />
           )}

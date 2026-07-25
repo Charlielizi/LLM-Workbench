@@ -52,6 +52,7 @@ export function AppShell({
 
   return (
     <div
+      data-testid="app-shell"
       className="grid h-screen overflow-hidden bg-[var(--color-bg-primary)] text-[var(--color-text-primary)]"
       style={{
         gridTemplateColumns: `${sidebarWidth}px minmax(0, 1fr) ${
@@ -83,6 +84,7 @@ export function AppShell({
         )}
       </div>
       <div
+        data-testid="provider-drawer-slot"
         className={`min-h-0 min-w-0 border-l border-[var(--color-border-light)] transition-opacity ${
           providerDrawerOpen ? "opacity-100" : "opacity-0"
         }`}

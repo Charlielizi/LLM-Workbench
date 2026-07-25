@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Columns3, Moon, Sun } from "lucide-react";
 import { createPortal } from "react-dom";
-import { PROVIDER_IDS, PROVIDER_LABELS } from "@aihub/core";
+import { PROVIDER_LABELS } from "@aihub/core";
 import type { ProviderId, ProviderSummary } from "@aihub/core";
 import { useAppStore } from "../../stores/app-store";
 import { useSettingsStore } from "../../stores/settings-store";
+import { useI18n } from "../../i18n";
 
 interface MenuItem {
   label: string;
@@ -14,15 +15,24 @@ interface MenuItem {
 }
 
 export function MenuBar() {
+  const { t } = useI18n();
   const providers = useAppStore((state) => state.snapshot.providers);
   const theme = useSettingsStore((state) => state.theme);
   const setTheme = useSettingsStore((state) => state.setTheme);
   const sidebarCollapsed = useSettingsStore((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useSettingsStore((s) => s.setSidebarCollapsed);
   const setComparisonSetupOpen = useAppStore((s) => s.setComparisonSetupOpen);
-  const setSettingsModalOpen = useAppStore((s) => s.setSettingsModalOpen);
+  const openSettings = useAppStore((s) => s.openSettings);
   const setShortcutHelpOpen = useAppStore((s) => s.setShortcutHelpOpen);
   const createConversation = useAppStore((s) => s.createConversation);
+  const providerOrder = useSettingsStore((state) => state.providerOrder);
+  const enabledProviders = useSettingsStore((state) => state.enabledProviders);
+  const defaultProvider = useSettingsStore(
+    (state) => state.defaultProvider ?? state.enabledProviders[0] ?? "chatgpt",
+  );
+  const visibleProviders = providerOrder.filter((provider) =>
+    enabledProviders.includes(provider),
+  );
 
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const menuBarRef = useRef<HTMLDivElement>(null);
@@ -51,27 +61,27 @@ export function MenuBar() {
   const menus: Record<string, MenuItem[]> = {
     file: [
       {
-        label: "新建对话",
-        action: () => void createConversation("chatgpt"),
+        label: t("nav.newChat"),
+        action: () => void createConversation(defaultProvider),
       },
       { separator: true, label: "" },
       {
-        label: "Compare 对比",
+        label: t("nav.compare"),
         action: () => setComparisonSetupOpen(true),
       },
     ],
     edit: [
       {
-        label: "搜索会话",
+        label: t("settings.conversations"),
         shortcut: "Ctrl+F",
         action: () => document.getElementById("conversation-search")?.focus(),
       },
     ],
     view: [
-      ...PROVIDER_IDS.map((id) => {
+      ...visibleProviders.map((id) => {
         const p = providers.find((pp) => pp.id === id);
         return {
-          label: `${p?.websiteVisible ? "隐藏" : "显示"} ${PROVIDER_LABELS[id]}`,
+          label: `${p?.websiteVisible ? t("provider.hide") : t("provider.show")} ${PROVIDER_LABELS[id]}`,
           action: () =>
             void window.aihub.setProviderWebsiteVisible(
               id,
@@ -81,26 +91,29 @@ export function MenuBar() {
       }),
       { separator: true, label: "" },
       {
-        label: theme === "dark" ? "浅色模式" : "深色模式",
+        label:
+          theme === "dark"
+            ? t("settings.theme.light")
+            : t("settings.theme.dark"),
         action: toggleTheme,
       },
     ],
     help: [
       {
-        label: "快捷键",
+        label: t("nav.shortcuts"),
         shortcut: "Ctrl+/",
         action: () => setShortcutHelpOpen(true),
       },
       { separator: true, label: "" },
-      { label: "设置", action: () => setSettingsModalOpen(true) },
+      { label: t("nav.settings"), action: () => openSettings() },
     ],
   };
 
   const menuLabels: { key: string; label: string }[] = [
-    { key: "file", label: "文件" },
-    { key: "edit", label: "编辑" },
-    { key: "view", label: "视图" },
-    { key: "help", label: "帮助" },
+    { key: "file", label: t("nav.file") },
+    { key: "edit", label: t("nav.edit") },
+    { key: "view", label: t("nav.view") },
+    { key: "help", label: t("nav.help") },
   ];
 
   return (
@@ -142,11 +155,17 @@ export function MenuBar() {
 }
 
 export function TopBar() {
+  const { t } = useI18n();
   const providers = useAppStore((state) => state.snapshot.providers);
   const theme = useSettingsStore((state) => state.theme);
   const setTheme = useSettingsStore((state) => state.setTheme);
   const setComparisonSetupOpen = useAppStore(
     (state) => state.setComparisonSetupOpen,
+  );
+  const providerOrder = useSettingsStore((state) => state.providerOrder);
+  const enabledProviders = useSettingsStore((state) => state.enabledProviders);
+  const visibleProviders = providerOrder.filter((provider) =>
+    enabledProviders.includes(provider),
   );
 
   return (
@@ -157,14 +176,15 @@ export function TopBar() {
 
       <div className="flex min-w-0 items-center gap-2 overflow-x-auto [app-region:no-drag]">
         <button
+          data-testid="open-comparison"
           className="interactive-chip flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-soft)] px-2.5 py-1 text-[11px] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
           onClick={() => setComparisonSetupOpen(true)}
         >
           <Columns3 size={13} />
-          Compare
+          {t("top.compare")}
         </button>
         <div className="flex items-center gap-1">
-          {PROVIDER_IDS.map((id) => (
+          {visibleProviders.map((id) => (
             <ProviderDot
               key={id}
               id={id}
@@ -181,7 +201,8 @@ export function TopBar() {
                 : "dark",
             )
           }
-          aria-label="Toggle theme"
+          aria-label={t("top.toggleTheme")}
+          title={t("top.toggleTheme")}
         >
           {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
         </button>
@@ -250,19 +271,35 @@ function ProviderDot({
   provider: ProviderSummary | undefined;
   id: ProviderId;
 }) {
+  const { t } = useI18n();
   const label = PROVIDER_LABELS[id];
+  const hasRecentFailure = Boolean(provider?.lastFailurePhase) && !provider?.degraded;
+  const status = provider?.degraded
+    ? t("provider.status.degraded")
+    : !provider?.authenticated
+      ? t("provider.status.login")
+      : provider.ready
+        ? t("provider.status.online")
+        : t("provider.status.unavailable");
+  const drawer = provider?.websiteVisible
+    ? t("provider.drawer.open")
+    : t("provider.drawer.closed");
+  const diagnostic = [
+    provider?.lastFailurePhase ? `phase=${provider.lastFailurePhase}` : undefined,
+    provider?.lastFailureCode ? `code=${provider.lastFailureCode}` : undefined,
+    provider?.lastFailureOrigin ? `origin=${provider.lastFailureOrigin}` : undefined,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const title = `${label} · ${status} · ${drawer}${
+    diagnostic ? ` · ${diagnostic}` : ""
+  }`;
   return (
     <button
       className="flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] text-[var(--color-text-tertiary)] transition hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
-      title={
-        provider?.degraded
-          ? "degraded"
-          : provider?.websiteVisible
-            ? "visible"
-            : provider?.authenticated
-              ? "logged in"
-              : "offline"
-      }
+      title={title}
+      aria-label={title}
+      aria-pressed={provider?.websiteVisible ?? false}
       onClick={() =>
         void window.aihub.setProviderWebsiteVisible(
           id,
@@ -275,6 +312,8 @@ function ProviderDot({
         style={{
           background: provider?.degraded
             ? "var(--color-danger)"
+            : hasRecentFailure
+              ? "var(--color-warning)"
             : provider?.authenticated
               ? "var(--color-online)"
               : "var(--color-offline)",

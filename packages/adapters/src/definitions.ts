@@ -303,11 +303,13 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       "button[aria-label*='Send']",
       "button[data-testid*='send']",
     ],
+    submitWithEnter: true,
     stopSelectors: [
       "button[aria-label*='停止']",
       "button[aria-label*='Stop']",
     ],
     assistantMessageSelectors: [
+      ".chat-content-item.chat-content-item-assistant",
       "[data-role='assistant']",
       "[data-testid*='assistant']",
       "[class*='assistant'] [class*='content']",
@@ -317,6 +319,15 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       "input[placeholder*='手机号']",
       "input[type='tel']",
       "button[class*='login']",
+      "button[class*='phone-login-action']",
+      "button[class*='history-list__login']",
+      "input[placeholder*='验证码']",
+    ],
+    authBlockerSelectors: [
+      "button[class*='phone-login-action']",
+      "button[class*='history-list__login']",
+      "input[placeholder*='验证码']",
+      "input[type='tel']",
     ],
     ...websiteControls([], {
       attachmentControlSelectors: [".toolkit-trigger-btn"],
@@ -332,7 +343,7 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       "https://oauth2callback.deepseek.com",
     ],
     newConversationUrls: ["https://chat.deepseek.com/"],
-    conversationUrlPattern: /[?&]q=([^&]+)/,
+    conversationUrlPattern: /(?:\/a\/chat\/s\/|[?&]q=)([^&/?#]+)/,
     composerSelectors: [
       "textarea[placeholder*='DeepSeek']",
       "textarea[placeholder*='发送']",
@@ -340,6 +351,7 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       "div[contenteditable='true'][role='textbox']",
     ],
     submitSelectors: [
+      "div[role='button'].ds-button--primary.ds-button--filled",
       "button[aria-label*='发送']",
       "button[aria-label*='Send']",
       "button[type='submit']",
@@ -391,9 +403,14 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       ".ql-editor",
     ],
     submitSelectors: [
+      "#yuanbao-send-btn",
+      "a[class*='send-btn']",
       "button[aria-label*='发送']",
+      "button[aria-label*='Send']",
       "button[data-testid*='send']",
       "button[class*='send']",
+      "button[class*='submit']",
+      "button[type='submit']",
     ],
     stopSelectors: [
       "button[aria-label*='停止']",
@@ -470,6 +487,15 @@ export const providerDefinitions: Record<ProviderId, ProviderDefinition> = {
       "input[placeholder*='手机号']",
       "input[type='tel']",
       "iframe[src*='login']",
+      "input[placeholder*='验证码']",
+    ],
+    authBlockerSelectors: [
+      "iframe[src*='login']",
+      "input[placeholder*='验证码']",
+      "[role='dialog'] [class*='login']",
+      "[role='dialog'] [class*='verify']",
+      "[class*='login-modal']",
+      "[class*='verify-modal']",
     ],
     ...websiteControls([
       {

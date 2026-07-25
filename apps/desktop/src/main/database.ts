@@ -3,23 +3,44 @@ import type {
   ContentBlock,
   ComparisonSession,
   AppSettingsPayload,
+  AdapterEventRecord,
   ConversationFolder,
   ConversationTag,
   NormalizedConversation,
   NormalizedMessage,
   KnowledgeDocument,
   ProviderId,
+  ProviderFailureOrigin,
   ProviderSendPhase,
   ProviderState,
   SystemPrompt,
 } from "@aihub/core";
 import { messageToText } from "@aihub/core";
 
+function normalizedMessageText(content: ContentBlock[]): string {
+  return content
+    .map((block) => {
+      if (block.type === "text" || block.type === "code") return block.text;
+      if (block.type === "image") return block.alt ?? block.src;
+      if (block.type === "attachment") return block.name;
+      if (block.type === "citation") return block.title ?? block.url;
+      if (block.type === "math") return block.tex;
+      return block.html;
+    })
+    .join("\n")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 interface ConversationRow {
   id: string;
   title: string;
   provider: ProviderId;
   external_id: string | null;
+  sync_status: NormalizedConversation["syncStatus"] | null;
+  last_synced_at: string | null;
+  sync_error: string | null;
+  remote_missing_count: number;
   hidden: number;
   pinned: number;
   pinned_at: string | null;
@@ -39,8 +60,11 @@ interface MessageRow {
   status_phase: string | null;
   status_detail: string | null;
   error_code: string | null;
+  failure_origin: string | null;
   provider: ProviderId;
   created_at: string;
+  remote_key: string | null;
+  source_order: number | null;
 }
 
 interface SystemPromptRow {
@@ -90,6 +114,14 @@ interface TagRow {
   created_at: string;
 }
 
+interface AdapterEventRow {
+  id: number;
+  provider: ProviderId;
+  type: string;
+  detail: string | null;
+  created_at: string;
+}
+
 export class AppDatabase {
   private readonly db: DatabaseSync;
   private closed = false;
@@ -131,6 +163,7 @@ export class AppDatabase {
         status_phase TEXT,
         status_detail TEXT,
         error_code TEXT,
+        failure_origin TEXT,
         provider TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
@@ -224,6 +257,9 @@ export class AppDatabase {
     this.addColumnIfMissing("messages", "status_phase", "TEXT");
     this.addColumnIfMissing("messages", "status_detail", "TEXT");
     this.addColumnIfMissing("messages", "error_code", "TEXT");
+    this.addColumnIfMissing("messages", "failure_origin", "TEXT");
+    this.addColumnIfMissing("messages", "remote_key", "TEXT");
+    this.addColumnIfMissing("messages", "source_order", "INTEGER");
     this.addColumnIfMissing(
       "conversations",
       "pinned",
@@ -232,6 +268,23 @@ export class AppDatabase {
     this.addColumnIfMissing("conversations", "pinned_at", "TEXT");
     this.addColumnIfMissing("conversations", "system_prompt_id", "TEXT");
     this.addColumnIfMissing("conversations", "folder_id", "TEXT");
+    this.addColumnIfMissing(
+      "conversations",
+      "sync_status",
+      "TEXT NOT NULL DEFAULT 'not-synced'",
+    );
+    this.addColumnIfMissing("conversations", "last_synced_at", "TEXT");
+    this.addColumnIfMissing("conversations", "sync_error", "TEXT");
+    this.addColumnIfMissing(
+      "conversations",
+      "remote_missing_count",
+      "INTEGER NOT NULL DEFAULT 0",
+    );
+    this.db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_remote_key
+        ON messages(conversation_id, remote_key)
+        WHERE remote_key IS NOT NULL;
+    `);
     this.initializeFullTextSearch();
   }
 
@@ -298,12 +351,163 @@ export class AppDatabase {
     };
   }
 
+  getConversationByExternalId(
+    provider: ProviderId,
+    externalId: string,
+  ): NormalizedConversation | undefined {
+    const row = this.db
+      .prepare("SELECT * FROM conversations WHERE provider = ? AND external_id = ? LIMIT 1")
+      .get(provider, externalId) as ConversationRow | undefined;
+    return row ? this.hydrateConversation(row) : undefined;
+  }
+
+  updateWebConversation(id: string, title: string, externalId: string): void {
+    this.db.prepare(
+      `UPDATE conversations
+       SET title = ?, external_id = ?, remote_missing_count = 0,
+           sync_status = CASE
+             WHEN sync_status = 'remote-missing' THEN 'not-synced'
+             ELSE sync_status
+           END,
+           sync_error = CASE
+             WHEN sync_status = 'remote-missing' THEN NULL
+             ELSE sync_error
+           END
+       WHERE id = ?
+         AND (
+           title <> ? OR external_id <> ? OR remote_missing_count <> 0
+           OR sync_status = 'remote-missing'
+         )`,
+    ).run(title, externalId, id, title, externalId);
+  }
+
+  setConversationSyncState(
+    id: string,
+    status: NonNullable<NormalizedConversation["syncStatus"]>,
+    options: { error?: string; syncedAt?: string } = {},
+  ): void {
+    this.db.prepare(
+      `UPDATE conversations
+       SET sync_status = ?, sync_error = ?, last_synced_at = COALESCE(?, last_synced_at)
+       WHERE id = ?`,
+    ).run(
+      status,
+      options.error ?? null,
+      options.syncedAt ?? null,
+      id,
+    );
+  }
+
+  markMissingWebConversations(provider: ProviderId, seenExternalIds: Set<string>): void {
+    const rows = this.db
+      .prepare(
+        `SELECT id, external_id, remote_missing_count
+         FROM conversations
+         WHERE provider = ? AND external_id IS NOT NULL`,
+      )
+      .all(provider) as unknown as Array<{
+        id: string;
+        external_id: string;
+        remote_missing_count: number;
+      }>;
+    const statement = this.db.prepare(
+      `UPDATE conversations
+       SET remote_missing_count = ?,
+           sync_status = CASE WHEN ? >= 2 THEN 'remote-missing' ELSE sync_status END,
+           sync_error = CASE WHEN ? >= 2 THEN 'Conversation was not found on the provider website.' ELSE sync_error END
+       WHERE id = ?`,
+    );
+    for (const row of rows) {
+      if (seenExternalIds.has(row.external_id)) continue;
+      const missingCount = row.remote_missing_count + 1;
+      statement.run(missingCount, missingCount, missingCount, row.id);
+    }
+  }
+
+  upsertWebsiteMessage(input: {
+    id: string;
+    conversationId: string;
+    provider: ProviderId;
+    remoteKey: string;
+    sourceOrder: number;
+    role: "user" | "assistant";
+    content: ContentBlock[];
+    providerHtml?: string;
+    createdAt: string;
+  }): void {
+    const byRemoteKey = this.db
+      .prepare(
+        "SELECT * FROM messages WHERE conversation_id = ? AND remote_key = ? LIMIT 1",
+      )
+      .get(input.conversationId, input.remoteKey) as MessageRow | undefined;
+    if (byRemoteKey) {
+      const unchanged =
+        byRemoteKey.content_json === JSON.stringify(input.content) &&
+        byRemoteKey.provider_html === (input.providerHtml ?? null) &&
+        byRemoteKey.status === "completed" &&
+        byRemoteKey.source_order === input.sourceOrder;
+      if (unchanged) return;
+      this.updateMessage(
+        byRemoteKey.id,
+        input.content,
+        "completed",
+        input.providerHtml,
+      );
+      this.db.prepare(
+        "UPDATE messages SET source_order = ? WHERE id = ?",
+      ).run(input.sourceOrder, byRemoteKey.id);
+      return;
+    }
+
+    const candidates = this.db
+      .prepare(
+        `SELECT * FROM messages
+         WHERE conversation_id = ? AND role = ? AND remote_key IS NULL
+           AND status = 'completed'
+         ORDER BY created_at, rowid`,
+      )
+      .all(input.conversationId, input.role) as unknown as MessageRow[];
+    const expectedText = normalizedMessageText(input.content);
+    const matched = candidates.find(
+      (candidate) =>
+        normalizedMessageText(
+          JSON.parse(candidate.content_json) as ContentBlock[],
+        ) === expectedText,
+    );
+    if (matched) {
+      this.updateMessage(
+        matched.id,
+        input.content,
+        "completed",
+        input.providerHtml,
+      );
+      this.db.prepare(
+        "UPDATE messages SET remote_key = ?, source_order = ? WHERE id = ?",
+      ).run(input.remoteKey, input.sourceOrder, matched.id);
+      return;
+    }
+
+    this.addMessage({
+      id: input.id,
+      conversationId: input.conversationId,
+      role: input.role,
+      content: input.content,
+      providerHtml: input.providerHtml,
+      status: "completed",
+      provider: input.provider,
+      createdAt: input.createdAt,
+    });
+    this.db.prepare(
+      "UPDATE messages SET remote_key = ?, source_order = ? WHERE id = ?",
+    ).run(input.remoteKey, input.sourceOrder, input.id);
+  }
+
   addMessage(message: NormalizedMessage): void {
     this.db
       .prepare(
         `INSERT INTO messages
-          (id, conversation_id, role, content_json, provider_html, status, status_phase, status_detail, error_code, provider, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, conversation_id, role, content_json, provider_html, status, status_phase, status_detail, error_code, failure_origin, provider, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         message.id,
@@ -315,11 +519,20 @@ export class AppDatabase {
         message.statusPhase ?? null,
         message.statusDetail ?? null,
         message.errorCode ?? null,
+        message.failureOrigin ?? null,
         message.provider,
         message.createdAt,
       );
     this.upsertMessageSearch(message);
     this.touchConversation(message.conversationId);
+  }
+
+  upsertMessage(message: NormalizedMessage): void {
+    if (this.getMessage(message.id)) {
+      this.updateMessage(message.id, message.content, message.status, message.providerHtml, message);
+      return;
+    }
+    this.addMessage(message);
   }
 
   updateMessage(
@@ -329,13 +542,13 @@ export class AppDatabase {
     providerHtml?: string,
     metadata?: Pick<
       NormalizedMessage,
-      "statusPhase" | "statusDetail" | "errorCode"
+      "statusPhase" | "statusDetail" | "errorCode" | "failureOrigin"
     >,
   ): void {
     this.db
       .prepare(
         `UPDATE messages
-         SET content_json = ?, provider_html = ?, status = ?, status_phase = ?, status_detail = ?, error_code = ?
+         SET content_json = ?, provider_html = ?, status = ?, status_phase = ?, status_detail = ?, error_code = ?, failure_origin = ?
          WHERE id = ?`,
       )
       .run(
@@ -345,6 +558,7 @@ export class AppDatabase {
         metadata?.statusPhase ?? null,
         metadata?.statusDetail ?? null,
         metadata?.errorCode ?? null,
+        metadata?.failureOrigin ?? null,
         messageId,
       );
     const message = this.getMessage(messageId);
@@ -830,6 +1044,32 @@ export class AppDatabase {
       .run(JSON.stringify(settings), new Date().toISOString());
   }
 
+  getStorageMetrics(): {
+    conversationCount: number;
+    messageCount: number;
+    documentCount: number;
+    documentBytes: number;
+    indexedCharacterCount: number;
+  } {
+    const scalar = (sql: string): number => {
+      const row = this.db.prepare(sql).get() as { value: number | null };
+      return Number(row.value ?? 0);
+    };
+    return {
+      conversationCount: scalar(
+        "SELECT COUNT(*) AS value FROM conversations WHERE hidden = 0",
+      ),
+      messageCount: scalar("SELECT COUNT(*) AS value FROM messages"),
+      documentCount: scalar("SELECT COUNT(*) AS value FROM documents"),
+      documentBytes: scalar(
+        "SELECT COALESCE(SUM(size_bytes), 0) AS value FROM documents",
+      ),
+      indexedCharacterCount: scalar(
+        "SELECT COALESCE(SUM(LENGTH(content)), 0) AS value FROM documents",
+      ),
+    };
+  }
+
   updateExternalId(conversationId: string, externalId?: string): void {
     this.db
       .prepare("UPDATE conversations SET external_id = ? WHERE id = ?")
@@ -907,6 +1147,62 @@ export class AppDatabase {
     }
   }
 
+  listAdapterEvents(
+    provider?: ProviderId,
+    limit = 50,
+    sinceCreatedAt?: string,
+  ): AdapterEventRecord[] {
+    const boundedLimit = Math.max(1, Math.min(500, limit));
+    const statement = provider && sinceCreatedAt
+      ? this.db.prepare(
+        `SELECT id, provider, type, detail, created_at
+          FROM adapter_events
+          WHERE provider = ? AND created_at >= ?
+          ORDER BY id DESC
+          LIMIT ?`,
+      )
+      : provider
+        ? this.db.prepare(
+          `SELECT id, provider, type, detail, created_at
+            FROM adapter_events
+            WHERE provider = ?
+            ORDER BY id DESC
+            LIMIT ?`,
+        )
+        : sinceCreatedAt
+          ? this.db.prepare(
+            `SELECT id, provider, type, detail, created_at
+              FROM adapter_events
+              WHERE created_at >= ?
+              ORDER BY id DESC
+              LIMIT ?`,
+          )
+          : this.db.prepare(
+            `SELECT id, provider, type, detail, created_at
+              FROM adapter_events
+              ORDER BY id DESC
+              LIMIT ?`,
+          );
+    const rows = provider && sinceCreatedAt
+      ? statement.all(provider, sinceCreatedAt, boundedLimit)
+      : provider
+        ? statement.all(provider, boundedLimit)
+        : sinceCreatedAt
+          ? statement.all(sinceCreatedAt, boundedLimit)
+          : statement.all(boundedLimit);
+    return rows
+      .map((row) => {
+        const event = row as unknown as AdapterEventRow;
+        return {
+          id: event.id,
+          provider: event.provider,
+          type: event.type,
+          detail: event.detail ?? undefined,
+          createdAt: event.created_at,
+        };
+      });
+  }
+
   close(): void {
     if (this.closed) return;
     this.closed = true;
@@ -926,7 +1222,13 @@ export class AppDatabase {
   private hydrateConversation(row: ConversationRow): NormalizedConversation {
     const messages = this.db
       .prepare(
-        "SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at, rowid",
+        `SELECT * FROM messages
+         WHERE conversation_id = ?
+         ORDER BY
+           CASE WHEN source_order IS NULL THEN 1 ELSE 0 END,
+           source_order,
+           created_at,
+           rowid`,
       )
       .all(row.id) as unknown as MessageRow[];
     return {
@@ -934,6 +1236,10 @@ export class AppDatabase {
       title: row.title,
       provider: row.provider,
       externalId: row.external_id ?? undefined,
+      syncStatus: row.sync_status ?? undefined,
+      lastSyncedAt: row.last_synced_at ?? undefined,
+      syncError: row.sync_error ?? undefined,
+      remoteMissingCount: row.remote_missing_count,
       hidden: Boolean(row.hidden),
       pinned: Boolean(row.pinned),
       pinnedAt: row.pinned_at ?? undefined,
@@ -970,6 +1276,8 @@ export class AppDatabase {
       statusPhase: (row.status_phase as ProviderSendPhase | null) ?? undefined,
       statusDetail: row.status_detail ?? undefined,
       errorCode: row.error_code ?? undefined,
+      failureOrigin:
+        (row.failure_origin as ProviderFailureOrigin | null) ?? undefined,
       provider: row.provider,
       createdAt: row.created_at,
     };

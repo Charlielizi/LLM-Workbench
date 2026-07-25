@@ -9,6 +9,48 @@ afterEach(() => {
 });
 
 describe("AppDatabase", () => {
+  it("upserts imported web conversations and deterministic messages", () => {
+    database = new AppDatabase(":memory:");
+    database.createConversation({
+      id: "web-conversation",
+      title: "Original title",
+      provider: "doubao",
+      externalId: "https://www.doubao.com/chat/external-1",
+    });
+    expect(database.getConversationByExternalId(
+      "doubao",
+      "https://www.doubao.com/chat/external-1",
+    )?.id).toBe("web-conversation");
+
+    database.updateWebConversation(
+      "web-conversation",
+      "Updated title",
+      "https://www.doubao.com/chat/external-1",
+    );
+    const message = {
+      id: "web-message-key",
+      conversationId: "web-conversation",
+      role: "assistant" as const,
+      content: [{ type: "text" as const, text: "First snapshot" }],
+      status: "completed" as const,
+      provider: "doubao" as const,
+      createdAt: new Date().toISOString(),
+    };
+    database.upsertMessage(message);
+    database.upsertMessage({
+      ...message,
+      content: [{ type: "text", text: "Updated snapshot" }],
+    });
+
+    const restored = database.getConversation("web-conversation");
+    expect(restored?.title).toBe("Updated title");
+    expect(restored?.messages).toHaveLength(1);
+    expect(restored?.messages[0]?.content[0]).toEqual({
+      type: "text",
+      text: "Updated snapshot",
+    });
+  });
+
   it("restores conversations independently from provider DOM state", () => {
     database = new AppDatabase(":memory:");
     const conversation = database.createConversation({
@@ -60,6 +102,77 @@ describe("AppDatabase", () => {
     expect(database.getConversation("conversation-2")?.messages[0]?.status).toBe(
       "completed",
     );
+  });
+
+  it("persists provider failure origin metadata", () => {
+    database = new AppDatabase(":memory:");
+    database.createConversation({
+      id: "conversation-failure-origin",
+      title: "Failure origin",
+      provider: "deepseek",
+    });
+    database.addMessage({
+      id: "message-failure-origin",
+      conversationId: "conversation-failure-origin",
+      role: "user",
+      content: [{ type: "text", text: "Retry this." }],
+      status: "failed",
+      statusPhase: "failed",
+      errorCode: "provider_external_failure",
+      failureOrigin: "external",
+      provider: "deepseek",
+      createdAt: new Date().toISOString(),
+    });
+
+    expect(database.getMessage("message-failure-origin")).toMatchObject({
+      errorCode: "provider_external_failure",
+      failureOrigin: "external",
+    });
+  });
+
+  it("stores recent adapter events with basic secret redaction", () => {
+    database = new AppDatabase(":memory:");
+
+    database.logAdapterEvent(
+      "chatgpt",
+      "provider.debug-snapshot",
+      "user@example.com token=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN",
+    );
+    database.logAdapterEvent("claude", "provider.network-idle", "ignored");
+
+    const events = database.listAdapterEvents();
+    expect(events).toHaveLength(2);
+    const chatgptEvents = database.listAdapterEvents("chatgpt");
+    expect(chatgptEvents).toHaveLength(1);
+    expect(chatgptEvents[0]).toMatchObject({
+      provider: "chatgpt",
+      type: "provider.debug-snapshot",
+    });
+    expect(chatgptEvents[0]?.detail).toContain("[email]");
+    expect(chatgptEvents[0]?.detail).toContain("[secret]");
+  });
+
+  it("filters adapter events by created_at when a lower bound is provided", () => {
+    database = new AppDatabase(":memory:");
+
+    database.logAdapterEvent("chatgpt", "message.status", "{\"phase\":\"checking-auth\"}");
+    const firstEvent = database.listAdapterEvents("chatgpt", 10)[0];
+    expect(firstEvent).toBeDefined();
+
+    database.logAdapterEvent("chatgpt", "message.status", "{\"phase\":\"submitting\"}");
+    const filtered = database.listAdapterEvents("chatgpt", 10, firstEvent?.createdAt);
+
+    expect(filtered).toHaveLength(2);
+    expect(filtered.map((event) => event.type)).toEqual([
+      "message.status",
+      "message.status",
+    ]);
+    const afterFirst = database.listAdapterEvents(
+      "chatgpt",
+      10,
+      "9999-12-31T23:59:59.999Z",
+    );
+    expect(afterFirst).toHaveLength(0);
   });
 
   it("keeps transfer preparation conversations out of the main list", () => {
@@ -297,6 +410,53 @@ describe("AppDatabase", () => {
     expect(
       database.getConversation("html-conversation")?.messages[0]?.providerHtml,
     ).toContain("<strong>Rendered answer</strong>");
+  });
+
+  it("reconciles website messages with matching local messages", () => {
+    database = new AppDatabase(":memory:");
+    database.createConversation({
+      id: "web-reconcile",
+      title: "Reconcile",
+      provider: "chatgpt",
+      externalId: "https://chatgpt.com/c/reconcile",
+    });
+    database.addMessage({
+      id: "local-user",
+      conversationId: "web-reconcile",
+      role: "user",
+      content: [{ type: "text", text: "same prompt" }],
+      status: "completed",
+      provider: "chatgpt",
+      createdAt: new Date().toISOString(),
+    });
+
+    database.upsertWebsiteMessage({
+      id: "remote-user",
+      conversationId: "web-reconcile",
+      provider: "chatgpt",
+      remoteKey: "remote-key-1",
+      sourceOrder: 0,
+      role: "user",
+      content: [{ type: "text", text: "same prompt" }],
+      createdAt: new Date().toISOString(),
+    });
+    database.upsertWebsiteMessage({
+      id: "another-remote-user",
+      conversationId: "web-reconcile",
+      provider: "chatgpt",
+      remoteKey: "remote-key-1",
+      sourceOrder: 0,
+      role: "user",
+      content: [{ type: "text", text: "same prompt updated" }],
+      createdAt: new Date().toISOString(),
+    });
+
+    const messages = database.getConversation("web-reconcile")?.messages;
+    expect(messages).toHaveLength(1);
+    expect(messages?.[0]?.id).toBe("local-user");
+    expect(messages?.[0]?.content).toEqual([
+      { type: "text", text: "same prompt updated" },
+    ]);
   });
 
   it("persists structured assistant content blocks", () => {

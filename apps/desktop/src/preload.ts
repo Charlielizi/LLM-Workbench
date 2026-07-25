@@ -53,6 +53,11 @@ const api: AIHubApi = {
   exportSettings: () => ipcRenderer.invoke("settings:export"),
   importSettings: (json) =>
     ipcRenderer.invoke("settings:import", { json }),
+  previewSettingsImport: (json) =>
+    ipcRenderer.invoke("settings:preview-import", { json }),
+  getStorageSummary: () => ipcRenderer.invoke("data:get-storage-summary"),
+  exportAllData: () => ipcRenderer.invoke("data:export-all"),
+  openDataFolder: () => ipcRenderer.invoke("data:open-folder"),
   openExternal: (url) => ipcRenderer.invoke("app:open-external", url),
   searchConversations: (query) =>
     ipcRenderer.invoke("conversation:search", { query }),
@@ -76,6 +81,30 @@ const api: AIHubApi = {
     ipcRenderer.invoke("provider:set-layout", { width }),
   discoverProviderModels: (provider) =>
     ipcRenderer.invoke("provider:discover-models", provider),
+  recoverProvider: (provider) =>
+    ipcRenderer.invoke("provider:recover", provider),
+  clearProviderSiteData: (provider) =>
+    ipcRenderer.invoke("provider:clear-site-data", provider),
+  submitProviderEnter: (provider) =>
+    ipcRenderer.invoke("provider:submit-enter", provider),
+  captureProviderAnchor: (provider) =>
+    ipcRenderer.invoke("provider:capture-anchor", provider),
+  syncLatestProviderResponse: (provider) =>
+    ipcRenderer.invoke("provider:sync-latest-response", provider),
+  syncWebHistory: (provider) =>
+    ipcRenderer.invoke("provider:sync-web-history", provider),
+  getProviderDebugSnapshot: (provider) =>
+    ipcRenderer.invoke("provider:get-debug-snapshot", provider),
+  getProviderWebsiteSnapshot: (provider) =>
+    ipcRenderer.invoke("provider:get-website-snapshot", provider),
+  getLatestProviderSmokeResult: (provider) =>
+    ipcRenderer.invoke("provider:get-latest-smoke-result", provider),
+  getProviderSmokeInspection: (provider) =>
+    ipcRenderer.invoke("provider:get-smoke-inspection", provider),
+  listProviderAdapterEvents: (provider, limit, sinceCreatedAt) =>
+    ipcRenderer.invoke("provider:list-adapter-events", { provider, limit, sinceCreatedAt }),
+  setProviderCleanMode: (provider, enabled) =>
+    ipcRenderer.invoke("provider:set-clean-mode", { provider, enabled }),
   listSystemPrompts: () => ipcRenderer.invoke("system-prompt:list"),
   createSystemPrompt: (input) =>
     ipcRenderer.invoke("system-prompt:create", input),

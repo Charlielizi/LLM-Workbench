@@ -1,6 +1,6 @@
 {
   "name": "aihub",
-  "version": "0.1.0",
+  "version": "0.1.0-rc.1",
   "private": true,
   "packageManager": "pnpm@10.12.4",
   "scripts": {
@@ -8,7 +8,13 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "package:win": "pnpm --filter @aihub/desktop package"
+    "package:win": "pnpm --filter @aihub/desktop package",
+    "smoke:provider": "node ./scripts/run-provider-smoke.mjs",
+    "smoke:watch": "node ./scripts/watch-provider-smoke.mjs",
+    "smoke:matrix": "node ./scripts/run-provider-smoke-matrix.mjs",
+    "smoke:summary": "node ./scripts/summarize-provider-smoke.mjs",
+    "test:real-providers": "node ./scripts/run-real-provider-matrix.mjs",
+    "test:ai": "node ./scripts/run-ai-validation.mjs"
   },
   "devDependencies": {
     "typescript": "^5.8.3",

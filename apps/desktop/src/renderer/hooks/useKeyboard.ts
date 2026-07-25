@@ -7,26 +7,48 @@ import {
 } from "../stores/settings-store";
 import { useToastStore } from "../stores/toast-store";
 import { messageText } from "../utils/message-text";
+import { shortcutFromKeyboardEvent } from "../utils/shortcuts";
+import { useDialogStore } from "../stores/dialog-store";
+import { translate } from "../i18n";
 
 export function useKeyboard() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const binding = eventBinding(event);
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-shortcut-recorder]")
+      ) {
+        return;
+      }
+      const app = useAppStore.getState();
+      const modalOpen =
+        useDialogStore.getState().modalCount > 0 ||
+        Boolean(useDialogStore.getState().request) ||
+        Boolean(useDialogStore.getState().inputRequest) ||
+        Boolean(app.transfer) ||
+        app.shortcutHelpOpen ||
+        app.systemPromptModalOpen ||
+        app.comparisonSetupOpen;
+      if (modalOpen) {
+        if (event.key === "Escape") {
+          app.setTransfer(undefined);
+          app.setShortcutHelpOpen(false);
+          app.setSystemPromptModalOpen(false);
+          app.setComparisonSetupOpen(false);
+        }
+        return;
+      }
+      const binding = shortcutFromKeyboardEvent(event);
+      if (!binding) return;
       const settings = useSettingsStore.getState();
       const shortcuts = { ...DEFAULT_SHORTCUTS, ...settings.shortcuts };
       const action = (
         Object.entries(shortcuts) as [ShortcutAction, string][]
-      ).find(([, value]) => value.toLowerCase() === binding)?.[0];
+      ).find(([, value]) => value === binding)?.[0];
 
-      if (event.key === "Escape") {
-        useAppStore.getState().setTransfer(undefined);
-        useAppStore.getState().setShortcutHelpOpen(false);
-        return;
-      }
       if (!action) return;
       event.preventDefault();
 
-      const app = useAppStore.getState();
       if (action === "focusSearch") {
         document.querySelector<HTMLInputElement>("#conversation-search")?.focus();
       } else if (action === "newConversation") {
@@ -60,7 +82,12 @@ export function useKeyboard() {
           .at(-1);
         if (response) {
           void navigator.clipboard.writeText(messageText(response));
-          useToastStore.getState().addToast("已复制最后一条回复", "success");
+          useToastStore
+            .getState()
+            .addToast(
+              translate(settings.locale, "toast.lastResponseCopied"),
+              "success",
+            );
         }
       } else if (
         action === "previousConversation" ||
@@ -81,13 +108,4 @@ export function useKeyboard() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
-}
-
-function eventBinding(event: KeyboardEvent): string {
-  const parts: string[] = [];
-  if (event.ctrlKey || event.metaKey) parts.push("ctrl");
-  if (event.shiftKey) parts.push("shift");
-  if (event.altKey) parts.push("alt");
-  parts.push(event.key.toLowerCase());
-  return parts.join("+");
 }

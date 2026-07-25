@@ -4,8 +4,10 @@ import { PROVIDER_LABELS } from "@aihub/core";
 import { useAppStore } from "../../stores/app-store";
 import { MessageContent } from "../chat/MessageContent";
 import { MessageStatus } from "../chat/MessageStatus";
+import { useI18n } from "../../i18n";
 
 export function ComparisonView() {
+  const { t } = useI18n();
   const [text, setText] = useState("");
   const activeId = useAppStore((state) => state.activeComparisonId);
   const snapshot = useAppStore((state) => state.snapshot);
@@ -25,7 +27,7 @@ export function ComparisonView() {
           className="rounded-full border border-[var(--color-border)] px-4 py-2"
           onClick={() => setActiveComparison(undefined)}
         >
-          Back to chat
+          {t("compare.back")}
         </button>
       </main>
     );
@@ -37,13 +39,17 @@ export function ComparisonView() {
   }
 
   return (
-    <main className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
+    <main
+      data-testid="comparison-view"
+      className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden"
+    >
       <header className="panel-glass sticky top-0 z-10 px-5 pb-3 pt-4">
         <div className="mx-auto flex w-full max-w-[1200px] items-center gap-3 rounded-[1.6rem] border border-[var(--color-border)] bg-[var(--color-bg-soft)] px-4 py-3 shadow-[var(--shadow-sm)]">
           <button
             className="interactive-chip rounded-full p-2 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
             onClick={() => setActiveComparison(undefined)}
-            aria-label="Back to chat"
+            aria-label={t("compare.back")}
+            title={t("compare.back")}
           >
             <ArrowLeft size={17} />
           </button>
@@ -74,7 +80,7 @@ export function ComparisonView() {
                     <article key={message.id}>
                       <div className="mb-2 text-[11px] text-[var(--color-text-tertiary)]">
                         {message.role === "user"
-                          ? "You"
+                          ? t("message.you")
                           : PROVIDER_LABELS[message.provider]}
                       </div>
                       <div
@@ -106,7 +112,7 @@ export function ComparisonView() {
             className="max-h-40 min-h-12 flex-1 resize-none bg-transparent px-2 py-1 outline-none"
             value={text}
             onChange={(event) => setText(event.target.value)}
-            placeholder="Send the same prompt to every provider"
+            placeholder={t("compare.placeholder")}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
@@ -118,6 +124,8 @@ export function ComparisonView() {
             className="interactive-chip grid size-11 place-items-center rounded-full bg-[var(--color-send-bg)] text-[var(--color-send-text)] disabled:opacity-40"
             disabled={busy || !text.trim()}
             onClick={() => void send()}
+            aria-label={t("chat.send")}
+            title={t("chat.send")}
           >
             <Send size={16} />
           </button>
