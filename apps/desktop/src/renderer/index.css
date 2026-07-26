@@ -114,6 +114,49 @@ html[data-motion="reduced"] *::after {
   }
 }
 
+@media (forced-colors: active) {
+  :root {
+    --color-bg-primary: Canvas;
+    --color-bg-secondary: Canvas;
+    --color-bg-tertiary: Canvas;
+    --color-bg-elevated: Canvas;
+    --color-bg-hover: Highlight;
+    --color-bg-active: Highlight;
+    --color-bg-inset: Field;
+    --color-bg-soft: Canvas;
+    --color-bg-glass: Canvas;
+    --color-bg-glass-strong: Canvas;
+    --color-border: CanvasText;
+    --color-border-light: CanvasText;
+    --color-border-input: CanvasText;
+    --color-border-strong: CanvasText;
+    --color-text-primary: CanvasText;
+    --color-text-secondary: CanvasText;
+    --color-text-tertiary: CanvasText;
+    --color-text-muted: GrayText;
+    --color-accent: LinkText;
+    --color-accent-bg: Highlight;
+    --color-danger: Mark;
+    --color-danger-text: MarkText;
+    --color-warning: CanvasText;
+    --color-online: CanvasText;
+    --color-offline: GrayText;
+    --color-user-bubble: Highlight;
+    --color-user-bubble-text: HighlightText;
+    --color-send-bg: ButtonFace;
+    --color-send-text: ButtonText;
+    --backdrop-blur: 0;
+  }
+
+  * {
+    box-shadow: none !important;
+  }
+
+  :where(button, input, textarea, select, [tabindex]):focus-visible {
+    outline: 3px solid Highlight !important;
+  }
+}
+
 @layer components {
   .panel-glass {
     background: var(--color-bg-glass);

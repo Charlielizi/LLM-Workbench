@@ -1,8 +1,9 @@
-import { DatabaseSync } from "node:sqlite";
+import { backup, DatabaseSync } from "node:sqlite";
 import type {
   ContentBlock,
   ComparisonSession,
   AppSettingsPayload,
+  AppDataExportV1,
   AdapterEventRecord,
   ConversationFolder,
   ConversationTag,
@@ -14,8 +15,13 @@ import type {
   ProviderSendPhase,
   ProviderState,
   SystemPrompt,
+  DataImportResult,
+  TrashEntityType,
+  TrashItem,
 } from "@aihub/core";
 import { messageToText } from "@aihub/core";
+
+export const DATABASE_SCHEMA_VERSION = 3;
 
 function normalizedMessageText(content: ContentBlock[]): string {
   return content
@@ -30,6 +36,18 @@ function normalizedMessageText(content: ContentBlock[]): string {
     .join("\n")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function activeEntityId(
+  database: DatabaseSync,
+  table: "folders" | "system_prompts",
+  id: string | undefined,
+): string | null {
+  if (!id) return null;
+  const row = database
+    .prepare(`SELECT id FROM ${table} WHERE id = ? AND deleted_at IS NULL`)
+    .get(id) as { id: string } | undefined;
+  return row?.id ?? null;
 }
 
 interface ConversationRow {
@@ -48,6 +66,7 @@ interface ConversationRow {
   folder_id: string | null;
   created_at: string;
   updated_at: string;
+  deleted_at: string | null;
 }
 
 interface MessageRow {
@@ -75,6 +94,7 @@ interface SystemPromptRow {
   is_default: number;
   created_at: string;
   updated_at: string;
+  deleted_at: string | null;
 }
 
 interface ComparisonSessionRow {
@@ -98,6 +118,7 @@ interface DocumentRow {
   size_bytes: number;
   created_at: string;
   updated_at: string;
+  deleted_at: string | null;
 }
 
 interface FolderRow {
@@ -105,6 +126,7 @@ interface FolderRow {
   name: string;
   parent_id: string | null;
   created_at: string;
+  deleted_at: string | null;
 }
 
 interface TagRow {
@@ -112,6 +134,7 @@ interface TagRow {
   name: string;
   color: string;
   created_at: string;
+  deleted_at: string | null;
 }
 
 interface AdapterEventRow {
@@ -122,15 +145,45 @@ interface AdapterEventRow {
   created_at: string;
 }
 
+function trashTable(type: TrashEntityType): string {
+  switch (type) {
+    case "conversation":
+      return "conversations";
+    case "folder":
+      return "folders";
+    case "tag":
+      return "tags";
+    case "system-prompt":
+      return "system_prompts";
+    case "document":
+      return "documents";
+  }
+}
+
 export class AppDatabase {
   private readonly db: DatabaseSync;
   private closed = false;
 
   constructor(path: string) {
     this.db = new DatabaseSync(path);
-    this.db.exec("PRAGMA journal_mode = WAL");
-    this.db.exec("PRAGMA foreign_keys = ON");
-    this.migrate();
+    try {
+      this.db.exec("PRAGMA journal_mode = WAL");
+      this.db.exec("PRAGMA foreign_keys = ON");
+      const currentVersion = (
+        this.db.prepare("PRAGMA user_version").get() as {
+          user_version: number;
+        }
+      ).user_version;
+      if (currentVersion > DATABASE_SCHEMA_VERSION) {
+        throw new Error(
+          `Database schema ${currentVersion} requires a newer AIHub version.`,
+        );
+      }
+      this.migrate();
+    } catch (error) {
+      this.db.close();
+      throw error;
+    }
   }
 
   private migrate(): void {
@@ -280,12 +333,48 @@ export class AppDatabase {
       "remote_missing_count",
       "INTEGER NOT NULL DEFAULT 0",
     );
+    this.addColumnIfMissing("conversations", "deleted_at", "TEXT");
+    this.addColumnIfMissing("folders", "deleted_at", "TEXT");
+    this.addColumnIfMissing("tags", "deleted_at", "TEXT");
+    this.addColumnIfMissing("system_prompts", "deleted_at", "TEXT");
+    this.addColumnIfMissing("documents", "deleted_at", "TEXT");
     this.db.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_remote_key
         ON messages(conversation_id, remote_key)
         WHERE remote_key IS NOT NULL;
+      CREATE TABLE IF NOT EXISTS deleted_web_conversations (
+        provider TEXT NOT NULL,
+        external_id TEXT NOT NULL,
+        deleted_at TEXT NOT NULL,
+        PRIMARY KEY (provider, external_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_conversations_deleted_at
+        ON conversations(deleted_at);
+      CREATE INDEX IF NOT EXISTS idx_documents_deleted_at
+        ON documents(deleted_at);
     `);
     this.initializeFullTextSearch();
+    this.db.exec(`PRAGMA user_version = ${DATABASE_SCHEMA_VERSION}`);
+  }
+
+  async backupTo(destinationPath: string): Promise<number> {
+    this.db.exec("PRAGMA wal_checkpoint(PASSIVE)");
+    return backup(this.db, destinationPath);
+  }
+
+  integrityCheck(): string[] {
+    return (
+      this.db.prepare("PRAGMA integrity_check").all() as Array<{
+        integrity_check: string;
+      }>
+    ).map((row) => row.integrity_check);
+  }
+
+  schemaVersion(): number {
+    const row = this.db.prepare("PRAGMA user_version").get() as {
+      user_version: number;
+    };
+    return row.user_version;
   }
 
   upsertProvider(provider: ProviderId, state: ProviderState): void {
@@ -356,7 +445,11 @@ export class AppDatabase {
     externalId: string,
   ): NormalizedConversation | undefined {
     const row = this.db
-      .prepare("SELECT * FROM conversations WHERE provider = ? AND external_id = ? LIMIT 1")
+      .prepare(
+        `SELECT * FROM conversations
+         WHERE provider = ? AND external_id = ? AND deleted_at IS NULL
+         LIMIT 1`,
+      )
       .get(provider, externalId) as ConversationRow | undefined;
     return row ? this.hydrateConversation(row) : undefined;
   }
@@ -403,7 +496,8 @@ export class AppDatabase {
       .prepare(
         `SELECT id, external_id, remote_missing_count
          FROM conversations
-         WHERE provider = ? AND external_id IS NOT NULL`,
+         WHERE provider = ? AND external_id IS NOT NULL
+           AND deleted_at IS NULL`,
       )
       .all(provider) as unknown as Array<{
         id: string;
@@ -621,7 +715,7 @@ export class AppDatabase {
 
   getConversation(id: string): NormalizedConversation | undefined {
     const row = this.db
-      .prepare("SELECT * FROM conversations WHERE id = ?")
+      .prepare("SELECT * FROM conversations WHERE id = ? AND deleted_at IS NULL")
       .get(id) as ConversationRow | undefined;
     return row ? this.hydrateConversation(row) : undefined;
   }
@@ -630,7 +724,8 @@ export class AppDatabase {
     const rows = this.db
       .prepare(
         `SELECT * FROM conversations
-         ${includeHidden ? "" : "WHERE hidden = 0"}
+         WHERE deleted_at IS NULL
+         ${includeHidden ? "" : "AND hidden = 0"}
          ORDER BY pinned DESC, pinned_at DESC, updated_at DESC`,
       )
       .all() as unknown as ConversationRow[];
@@ -652,6 +747,7 @@ export class AppDatabase {
         `SELECT DISTINCT conversations.*
          FROM conversations
          WHERE conversations.hidden = 0
+           AND conversations.deleted_at IS NULL
            AND (
              conversations.title LIKE ? COLLATE NOCASE
              OR conversations.id IN (
@@ -692,18 +788,48 @@ export class AppDatabase {
   }
 
   deleteConversation(conversationId: string): void {
-    this.db
-      .prepare("DELETE FROM messages_fts WHERE conversation_id = ?")
-      .run(conversationId);
-    this.db
-      .prepare("DELETE FROM conversations WHERE id = ?")
-      .run(conversationId);
+    const row = this.db
+      .prepare(
+        `SELECT provider, external_id FROM conversations
+         WHERE id = ? AND deleted_at IS NULL`,
+      )
+      .get(conversationId) as {
+        provider: ProviderId;
+        external_id: string | null;
+      } | undefined;
+    if (!row) return;
+    const deletedAt = new Date().toISOString();
+    this.db.exec("BEGIN");
+    try {
+      this.db
+        .prepare(
+          `UPDATE conversations
+           SET deleted_at = ?, pinned = 0, pinned_at = NULL
+           WHERE id = ?`,
+        )
+        .run(deletedAt, conversationId);
+      if (row.external_id) {
+        this.db
+          .prepare(
+            `INSERT INTO deleted_web_conversations
+             (provider, external_id, deleted_at) VALUES (?, ?, ?)
+             ON CONFLICT(provider, external_id) DO UPDATE SET
+               deleted_at = excluded.deleted_at`,
+          )
+          .run(row.provider, row.external_id, deletedAt);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   listSystemPrompts(): SystemPrompt[] {
     const rows = this.db
       .prepare(
         `SELECT * FROM system_prompts
+         WHERE deleted_at IS NULL
          ORDER BY is_default DESC, updated_at DESC`,
       )
       .all() as unknown as SystemPromptRow[];
@@ -712,7 +838,9 @@ export class AppDatabase {
 
   getSystemPrompt(id: string): SystemPrompt | undefined {
     const row = this.db
-      .prepare("SELECT * FROM system_prompts WHERE id = ?")
+      .prepare(
+        "SELECT * FROM system_prompts WHERE id = ? AND deleted_at IS NULL",
+      )
       .get(id) as SystemPromptRow | undefined;
     return row ? this.hydrateSystemPrompt(row) : undefined;
   }
@@ -721,7 +849,8 @@ export class AppDatabase {
     const row = this.db
       .prepare(
         `SELECT * FROM system_prompts
-         WHERE is_default = 1 AND (provider = ? OR provider IS NULL)
+         WHERE is_default = 1 AND deleted_at IS NULL
+           AND (provider = ? OR provider IS NULL)
          ORDER BY CASE WHEN provider = ? THEN 0 ELSE 1 END, updated_at DESC
          LIMIT 1`,
       )
@@ -781,19 +910,13 @@ export class AppDatabase {
   }
 
   deleteSystemPrompt(id: string): void {
-    this.db.exec("BEGIN");
-    try {
-      this.db
-        .prepare(
-          "UPDATE conversations SET system_prompt_id = NULL WHERE system_prompt_id = ?",
-        )
-        .run(id);
-      this.db.prepare("DELETE FROM system_prompts WHERE id = ?").run(id);
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    this.db
+      .prepare(
+        `UPDATE system_prompts
+         SET deleted_at = ?, is_default = 0
+         WHERE id = ? AND deleted_at IS NULL`,
+      )
+      .run(new Date().toISOString(), id);
   }
 
   setConversationSystemPrompt(
@@ -882,13 +1005,19 @@ export class AppDatabase {
 
   listDocuments(): KnowledgeDocument[] {
     const rows = this.db
-      .prepare("SELECT * FROM documents ORDER BY updated_at DESC")
+      .prepare(
+        "SELECT * FROM documents WHERE deleted_at IS NULL ORDER BY updated_at DESC",
+      )
       .all() as unknown as DocumentRow[];
     return rows.map((row) => this.hydrateDocument(row));
   }
 
   removeDocument(id: string): void {
-    this.db.prepare("DELETE FROM documents WHERE id = ?").run(id);
+    this.db
+      .prepare(
+        "UPDATE documents SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL",
+      )
+      .run(new Date().toISOString(), id);
   }
 
   setConversationDocuments(
@@ -926,6 +1055,7 @@ export class AppDatabase {
          INNER JOIN conversation_documents
            ON conversation_documents.document_id = documents.id
          WHERE conversation_documents.conversation_id = ?
+           AND documents.deleted_at IS NULL
          ORDER BY documents.updated_at DESC`,
       )
       .all(conversationId) as unknown as DocumentRow[];
@@ -949,12 +1079,19 @@ export class AppDatabase {
   listFolders(): ConversationFolder[] {
     return (
       this.db
-        .prepare("SELECT * FROM folders ORDER BY name COLLATE NOCASE")
+        .prepare(
+          "SELECT * FROM folders WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE",
+        )
         .all() as unknown as FolderRow[]
     ).map((row) => ({
       id: row.id,
       name: row.name,
-      parentId: row.parent_id ?? undefined,
+      parentId:
+        activeEntityId(
+          this.db,
+          "folders",
+          row.parent_id ?? undefined,
+        ) ?? undefined,
       createdAt: row.created_at,
     }));
   }
@@ -965,9 +1102,10 @@ export class AppDatabase {
 
   deleteFolder(id: string): void {
     this.db
-      .prepare("UPDATE conversations SET folder_id = NULL WHERE folder_id = ?")
-      .run(id);
-    this.db.prepare("DELETE FROM folders WHERE id = ?").run(id);
+      .prepare(
+        "UPDATE folders SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL",
+      )
+      .run(new Date().toISOString(), id);
   }
 
   createTag(tag: ConversationTag): void {
@@ -982,7 +1120,9 @@ export class AppDatabase {
   listTags(): ConversationTag[] {
     return (
       this.db
-        .prepare("SELECT * FROM tags ORDER BY name COLLATE NOCASE")
+        .prepare(
+          "SELECT * FROM tags WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE",
+        )
         .all() as unknown as TagRow[]
     ).map((row) => ({
       id: row.id,
@@ -993,7 +1133,11 @@ export class AppDatabase {
   }
 
   deleteTag(id: string): void {
-    this.db.prepare("DELETE FROM tags WHERE id = ?").run(id);
+    this.db
+      .prepare(
+        "UPDATE tags SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL",
+      )
+      .run(new Date().toISOString(), id);
   }
 
   setConversationFolder(
@@ -1017,6 +1161,468 @@ export class AppDatabase {
       );
       for (const tagId of tagIds) insert.run(conversationId, tagId);
       this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  listTrash(retentionDays: number): TrashItem[] {
+    const rows = this.db
+      .prepare(
+        `SELECT 'conversation' AS type, id, title AS label, deleted_at, provider
+           FROM conversations WHERE deleted_at IS NOT NULL
+         UNION ALL
+         SELECT 'folder' AS type, id, name AS label, deleted_at, NULL AS provider
+           FROM folders WHERE deleted_at IS NOT NULL
+         UNION ALL
+         SELECT 'tag' AS type, id, name AS label, deleted_at, NULL AS provider
+           FROM tags WHERE deleted_at IS NOT NULL
+         UNION ALL
+         SELECT 'system-prompt' AS type, id, name AS label, deleted_at,
+           provider
+           FROM system_prompts WHERE deleted_at IS NOT NULL
+         UNION ALL
+         SELECT 'document' AS type, id, name AS label, deleted_at,
+           NULL AS provider
+           FROM documents WHERE deleted_at IS NOT NULL
+         ORDER BY deleted_at DESC`,
+      )
+      .all() as unknown as Array<{
+        type: TrashEntityType;
+        id: string;
+        label: string;
+        deleted_at: string;
+        provider: ProviderId | null;
+      }>;
+    return rows.map((row) => ({
+      type: row.type,
+      id: row.id,
+      label: row.label,
+      deletedAt: row.deleted_at,
+      purgeAt:
+        retentionDays > 0
+          ? new Date(
+              new Date(row.deleted_at).getTime() +
+                retentionDays * 24 * 60 * 60 * 1_000,
+            ).toISOString()
+          : undefined,
+      provider: row.provider ?? undefined,
+    }));
+  }
+
+  restoreTrash(type: TrashEntityType, id: string): void {
+    const table = trashTable(type);
+    this.db.exec("BEGIN");
+    try {
+      if (type === "conversation") {
+        const row = this.db
+          .prepare(
+            `SELECT provider, external_id FROM conversations
+             WHERE id = ? AND deleted_at IS NOT NULL`,
+          )
+          .get(id) as {
+            provider: ProviderId;
+            external_id: string | null;
+          } | undefined;
+        if (row?.external_id) {
+          this.db
+            .prepare(
+              `DELETE FROM deleted_web_conversations
+               WHERE provider = ? AND external_id = ?`,
+            )
+            .run(row.provider, row.external_id);
+        }
+      }
+      this.db
+        .prepare(`UPDATE ${table} SET deleted_at = NULL WHERE id = ?`)
+        .run(id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  purgeTrash(type: TrashEntityType, id: string): void {
+    this.db.exec("BEGIN");
+    try {
+      switch (type) {
+        case "conversation":
+          this.db
+            .prepare("DELETE FROM messages_fts WHERE conversation_id = ?")
+            .run(id);
+          this.db
+            .prepare(
+              "DELETE FROM conversations WHERE id = ? AND deleted_at IS NOT NULL",
+            )
+            .run(id);
+          break;
+        case "folder":
+          this.db
+            .prepare("UPDATE conversations SET folder_id = NULL WHERE folder_id = ?")
+            .run(id);
+          this.db
+            .prepare("DELETE FROM folders WHERE id = ? AND deleted_at IS NOT NULL")
+            .run(id);
+          break;
+        case "tag":
+          this.db
+            .prepare("DELETE FROM tags WHERE id = ? AND deleted_at IS NOT NULL")
+            .run(id);
+          break;
+        case "system-prompt":
+          this.db
+            .prepare(
+              "UPDATE conversations SET system_prompt_id = NULL WHERE system_prompt_id = ?",
+            )
+            .run(id);
+          this.db
+            .prepare(
+              "DELETE FROM system_prompts WHERE id = ? AND deleted_at IS NOT NULL",
+            )
+            .run(id);
+          break;
+        case "document":
+          this.db
+            .prepare(
+              "DELETE FROM documents WHERE id = ? AND deleted_at IS NOT NULL",
+            )
+            .run(id);
+          break;
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  emptyTrash(): void {
+    this.db.exec("BEGIN");
+    try {
+      this.db.exec(`
+        DELETE FROM messages_fts
+        WHERE conversation_id IN (
+          SELECT id FROM conversations WHERE deleted_at IS NOT NULL
+        );
+        UPDATE conversations
+        SET folder_id = NULL
+        WHERE folder_id IN (
+          SELECT id FROM folders WHERE deleted_at IS NOT NULL
+        );
+        UPDATE conversations
+        SET system_prompt_id = NULL
+        WHERE system_prompt_id IN (
+          SELECT id FROM system_prompts WHERE deleted_at IS NOT NULL
+        );
+        DELETE FROM conversations WHERE deleted_at IS NOT NULL;
+        DELETE FROM folders WHERE deleted_at IS NOT NULL;
+        DELETE FROM tags WHERE deleted_at IS NOT NULL;
+        DELETE FROM system_prompts WHERE deleted_at IS NOT NULL;
+        DELETE FROM documents WHERE deleted_at IS NOT NULL;
+      `);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  purgeExpiredTrash(retentionDays: number): number {
+    if (retentionDays <= 0) return 0;
+    const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1_000;
+    const expired = this.listTrash(retentionDays).filter(
+      (item) => new Date(item.deletedAt).getTime() <= cutoff,
+    );
+    for (const item of expired) this.purgeTrash(item.type, item.id);
+    return expired.length;
+  }
+
+  isWebConversationDeleted(
+    provider: ProviderId,
+    externalId: string,
+  ): boolean {
+    return Boolean(
+      this.db
+        .prepare(
+          `SELECT 1 AS present FROM deleted_web_conversations
+           WHERE provider = ? AND external_id = ?`,
+        )
+        .get(provider, externalId),
+    );
+  }
+
+  allowWebConversationReimport(provider: ProviderId, externalId: string): void {
+    this.db
+      .prepare(
+        `DELETE FROM deleted_web_conversations
+         WHERE provider = ? AND external_id = ?`,
+      )
+      .run(provider, externalId);
+  }
+
+  clearLocalContent(options: { resetSettings: boolean }): void {
+    this.db.exec("BEGIN");
+    try {
+      this.db.exec(`
+        DELETE FROM messages_fts;
+        DELETE FROM comparison_sessions;
+        DELETE FROM transfers;
+        DELETE FROM conversations;
+        DELETE FROM system_prompts;
+        DELETE FROM documents;
+        DELETE FROM folders;
+        DELETE FROM tags;
+        DELETE FROM deleted_web_conversations;
+        DELETE FROM adapter_events;
+      `);
+      if (options.resetSettings) {
+        this.db
+          .prepare("DELETE FROM app_settings WHERE key = 'renderer'")
+          .run();
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  analyzeDataImport(payload: AppDataExportV1): DataImportResult {
+    const recordExists = (table: string, id: string): boolean =>
+      Boolean(
+        this.db
+          .prepare(`SELECT 1 AS present FROM ${table} WHERE id = ?`)
+          .get(id),
+      );
+    const importableConversations = payload.conversations.filter(
+      (conversation) => !recordExists("conversations", conversation.id),
+    );
+    const importableFolders = payload.folders.filter(
+      (folder) => !recordExists("folders", folder.id),
+    );
+    const importableTags = payload.tags.filter(
+      (tag) =>
+        !recordExists("tags", tag.id) &&
+        !this.db
+          .prepare("SELECT 1 AS present FROM tags WHERE name = ?")
+          .get(tag.name),
+    );
+    const importablePrompts = payload.systemPrompts.filter(
+      (prompt) => !recordExists("system_prompts", prompt.id),
+    );
+    const adjustedDefaultPromptCount = importablePrompts.filter(
+      (prompt) =>
+        prompt.isDefault &&
+        Boolean(
+          this.db
+            .prepare(
+              `SELECT 1 AS present FROM system_prompts
+               WHERE deleted_at IS NULL AND is_default = 1
+                 AND (
+                   provider = ?
+                   OR (provider IS NULL AND ? IS NULL)
+                 )`,
+            )
+            .get(prompt.provider ?? null, prompt.provider ?? null),
+        ),
+    ).length;
+    const importableMessages = importableConversations.flatMap(
+      (conversation) =>
+        conversation.messages.filter(
+          (message) => !recordExists("messages", message.id),
+        ),
+    );
+    const candidateCount =
+      payload.conversations.length +
+      payload.conversations.reduce(
+        (total, conversation) => total + conversation.messages.length,
+        0,
+      ) +
+      payload.folders.length +
+      payload.tags.length +
+      payload.systemPrompts.length;
+    const importableCount =
+      importableConversations.length +
+      importableMessages.length +
+      importableFolders.length +
+      importableTags.length +
+      importablePrompts.length;
+    return {
+      conversationCount: importableConversations.length,
+      messageCount: importableMessages.length,
+      folderCount: importableFolders.length,
+      tagCount: importableTags.length,
+      systemPromptCount: importablePrompts.length,
+      skippedConflictCount: candidateCount - importableCount,
+      ignoredKnowledgeDocumentCount: payload.documents.length,
+      adjustedDefaultPromptCount,
+    };
+  }
+
+  importAppData(payload: AppDataExportV1): DataImportResult {
+    const expected = this.analyzeDataImport(payload);
+    const inserted: DataImportResult = {
+      conversationCount: 0,
+      messageCount: 0,
+      folderCount: 0,
+      tagCount: 0,
+      systemPromptCount: 0,
+      skippedConflictCount: expected.skippedConflictCount,
+      ignoredKnowledgeDocumentCount: payload.documents.length,
+      adjustedDefaultPromptCount: expected.adjustedDefaultPromptCount,
+    };
+    this.db.exec("BEGIN");
+    try {
+      const insertFolder = this.db.prepare(
+        `INSERT OR IGNORE INTO folders
+         (id, name, parent_id, created_at, deleted_at)
+         VALUES (?, ?, NULL, ?, NULL)`,
+      );
+      for (const folder of payload.folders) {
+        inserted.folderCount += Number(
+          insertFolder.run(folder.id, folder.name, folder.createdAt).changes,
+        );
+      }
+      const setFolderParent = this.db.prepare(
+        `UPDATE folders SET parent_id = ?
+         WHERE id = ? AND deleted_at IS NULL
+           AND EXISTS (
+             SELECT 1 FROM folders AS parent
+             WHERE parent.id = ? AND parent.deleted_at IS NULL
+           )`,
+      );
+      for (const folder of payload.folders) {
+        if (folder.parentId) {
+          setFolderParent.run(folder.parentId, folder.id, folder.parentId);
+        }
+      }
+
+      const insertTag = this.db.prepare(
+        `INSERT OR IGNORE INTO tags
+         (id, name, color, created_at, deleted_at)
+         VALUES (?, ?, ?, ?, NULL)`,
+      );
+      for (const tag of payload.tags) {
+        inserted.tagCount += Number(
+          insertTag.run(tag.id, tag.name, tag.color, tag.createdAt).changes,
+        );
+      }
+
+      const insertPrompt = this.db.prepare(
+        `INSERT OR IGNORE INTO system_prompts
+         (id, name, content, provider, is_default, created_at, updated_at,
+          deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+      );
+      const hasDefaultPrompt = this.db.prepare(
+        `SELECT 1 AS present FROM system_prompts
+         WHERE deleted_at IS NULL AND is_default = 1
+           AND (
+             provider = ?
+             OR (provider IS NULL AND ? IS NULL)
+           )`,
+      );
+      for (const prompt of payload.systemPrompts) {
+        const provider = prompt.provider ?? null;
+        const keepAsDefault =
+          prompt.isDefault &&
+          !hasDefaultPrompt.get(provider, provider);
+        inserted.systemPromptCount += Number(
+          insertPrompt.run(
+            prompt.id,
+            prompt.name,
+            prompt.content,
+            provider,
+            Number(keepAsDefault),
+            prompt.createdAt,
+            prompt.updatedAt,
+          ).changes,
+        );
+      }
+
+      const insertConversation = this.db.prepare(
+        `INSERT OR IGNORE INTO conversations
+         (id, title, provider, external_id, hidden, pinned, pinned_at,
+          system_prompt_id, folder_id, sync_status, last_synced_at,
+          sync_error, remote_missing_count, created_at, updated_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+      );
+      const insertMessage = this.db.prepare(
+        `INSERT OR IGNORE INTO messages
+         (id, conversation_id, role, content_json, provider_html, status,
+          status_phase, status_detail, error_code, failure_origin, provider,
+          created_at, remote_key, source_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+      );
+      const insertConversationTag = this.db.prepare(
+        `INSERT OR IGNORE INTO conversation_tags
+         (conversation_id, tag_id)
+         SELECT ?, ? WHERE EXISTS (
+           SELECT 1 FROM tags WHERE id = ? AND deleted_at IS NULL
+         )`,
+      );
+      const clearImportedTombstone = this.db.prepare(
+        `DELETE FROM deleted_web_conversations
+         WHERE provider = ? AND external_id = ?`,
+      );
+      for (const conversation of payload.conversations) {
+        const result = insertConversation.run(
+          conversation.id,
+          conversation.title,
+          conversation.provider,
+          conversation.externalId ?? null,
+          Number(conversation.hidden ?? false),
+          Number(conversation.pinned ?? false),
+          conversation.pinnedAt ?? null,
+          activeEntityId(this.db, "system_prompts", conversation.systemPromptId),
+          activeEntityId(this.db, "folders", conversation.folderId),
+          conversation.syncStatus ?? "not-synced",
+          conversation.lastSyncedAt ?? null,
+          conversation.syncError ?? null,
+          conversation.remoteMissingCount ?? 0,
+          conversation.createdAt,
+          conversation.updatedAt,
+        );
+        if (Number(result.changes) === 0) continue;
+        inserted.conversationCount += 1;
+        if (conversation.externalId) {
+          clearImportedTombstone.run(
+            conversation.provider,
+            conversation.externalId,
+          );
+        }
+        for (const tagId of conversation.tagIds) {
+          insertConversationTag.run(conversation.id, tagId, tagId);
+        }
+        for (const message of conversation.messages) {
+          const interrupted =
+            message.status === "pending" || message.status === "streaming";
+          const messageResult = insertMessage.run(
+            message.id,
+            conversation.id,
+            message.role,
+            JSON.stringify(message.content),
+            message.providerHtml ?? null,
+            interrupted ? "failed" : message.status,
+            interrupted ? "failed" : (message.statusPhase ?? null),
+            interrupted ? null : (message.statusDetail ?? null),
+            interrupted
+              ? "imported_incomplete_message"
+              : (message.errorCode ?? null),
+            interrupted ? "client" : (message.failureOrigin ?? null),
+            message.provider,
+            message.createdAt,
+          );
+          if (Number(messageResult.changes) > 0) {
+            inserted.messageCount += 1;
+            this.upsertMessageSearch(message);
+          }
+        }
+      }
+      this.db.exec("COMMIT");
+      return inserted;
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
@@ -1057,15 +1663,25 @@ export class AppDatabase {
     };
     return {
       conversationCount: scalar(
-        "SELECT COUNT(*) AS value FROM conversations WHERE hidden = 0",
+        `SELECT COUNT(*) AS value FROM conversations
+         WHERE hidden = 0 AND deleted_at IS NULL`,
       ),
-      messageCount: scalar("SELECT COUNT(*) AS value FROM messages"),
-      documentCount: scalar("SELECT COUNT(*) AS value FROM documents"),
+      messageCount: scalar(
+        `SELECT COUNT(*) AS value FROM messages
+         INNER JOIN conversations
+           ON conversations.id = messages.conversation_id
+         WHERE conversations.deleted_at IS NULL`,
+      ),
+      documentCount: scalar(
+        "SELECT COUNT(*) AS value FROM documents WHERE deleted_at IS NULL",
+      ),
       documentBytes: scalar(
-        "SELECT COALESCE(SUM(size_bytes), 0) AS value FROM documents",
+        `SELECT COALESCE(SUM(size_bytes), 0) AS value FROM documents
+         WHERE deleted_at IS NULL`,
       ),
       indexedCharacterCount: scalar(
-        "SELECT COALESCE(SUM(LENGTH(content)), 0) AS value FROM documents",
+        `SELECT COALESCE(SUM(LENGTH(content)), 0) AS value FROM documents
+         WHERE deleted_at IS NULL`,
       ),
     };
   }
@@ -1243,19 +1859,36 @@ export class AppDatabase {
       hidden: Boolean(row.hidden),
       pinned: Boolean(row.pinned),
       pinnedAt: row.pinned_at ?? undefined,
-      systemPromptId: row.system_prompt_id ?? undefined,
+      systemPromptId:
+        activeEntityId(
+          this.db,
+          "system_prompts",
+          row.system_prompt_id ?? undefined,
+        ) ?? undefined,
       documentIds: this.db
         .prepare(
-          `SELECT document_id FROM conversation_documents
-           WHERE conversation_id = ?`,
+          `SELECT conversation_documents.document_id
+           FROM conversation_documents
+           INNER JOIN documents
+             ON documents.id = conversation_documents.document_id
+           WHERE conversation_documents.conversation_id = ?
+             AND documents.deleted_at IS NULL`,
         )
         .all(row.id)
         .map((item) => (item as { document_id: string }).document_id),
-      folderId: row.folder_id ?? undefined,
+      folderId:
+        activeEntityId(
+          this.db,
+          "folders",
+          row.folder_id ?? undefined,
+        ) ?? undefined,
       tagIds: this.db
         .prepare(
-          `SELECT tag_id FROM conversation_tags
-           WHERE conversation_id = ?`,
+          `SELECT conversation_tags.tag_id
+           FROM conversation_tags
+           INNER JOIN tags ON tags.id = conversation_tags.tag_id
+           WHERE conversation_tags.conversation_id = ?
+             AND tags.deleted_at IS NULL`,
         )
         .all(row.id)
         .map((item) => (item as { tag_id: string }).tag_id),
@@ -1329,8 +1962,13 @@ export class AppDatabase {
   ): ComparisonSession {
     const participants = this.db
       .prepare(
-        `SELECT conversation_id, provider
-         FROM comparison_participants WHERE session_id = ?`,
+        `SELECT comparison_participants.conversation_id,
+                comparison_participants.provider
+         FROM comparison_participants
+         INNER JOIN conversations
+           ON conversations.id = comparison_participants.conversation_id
+         WHERE comparison_participants.session_id = ?
+           AND conversations.deleted_at IS NULL`,
       )
       .all(row.id) as unknown as ComparisonParticipantRow[];
     return {

@@ -6,6 +6,9 @@ import { AppService } from "./app-service";
 import { AppDatabase } from "./database";
 import { registerIpc } from "./ipc";
 import { readProviderSmokeRequest, runProviderSmokeTest } from "./provider-smoke";
+import { applyPendingDatabaseRestore } from "./backup-service";
+import { SystemIntegration } from "./system-integration";
+import { UpdateService } from "./update-service";
 
 if (started) app.quit();
 
@@ -29,6 +32,8 @@ if (!hasSingleInstanceLock) {
 let mainWindow: BrowserWindow | undefined;
 let service: AppService | undefined;
 let database: AppDatabase | undefined;
+let systemIntegration: SystemIntegration | undefined;
+let updateService: UpdateService | undefined;
 let bootstrapLogPath: string | undefined;
 let runtimeInfoPath: string | undefined;
 let smokeMonitorTimer: ReturnType<typeof setInterval> | undefined;
@@ -47,6 +52,7 @@ function configureRemoteDebugging(): void {
 
 async function createWindow(): Promise<void> {
   const userDataDir = app.getPath("userData");
+  const useChinese = app.getLocale().toLowerCase().startsWith("zh");
   bootstrapLogPath = path.join(userDataDir, "diagnostics", "bootstrap.log");
   runtimeInfoPath = path.join(userDataDir, "diagnostics", "runtime-info.json");
   await writeRuntimeInfo();
@@ -54,6 +60,18 @@ async function createWindow(): Promise<void> {
     `runtime:start instance=${runtimeInfo.instanceId} pid=${runtimeInfo.pid} startedAt=${runtimeInfo.startedAt}`,
   );
   await logBootstrap(`createWindow:start userData=${userDataDir}`);
+  let restoreFailure: string | undefined;
+  try {
+    const restoredBackupId = await applyPendingDatabaseRestore(userDataDir);
+    if (restoredBackupId) {
+      await logBootstrap(`database:restored backup=${restoredBackupId}`);
+    }
+  } catch (error) {
+    restoreFailure = error instanceof Error ? error.message : String(error);
+    await logBootstrap(
+      `database:restore-failed error=${restoreFailure}`,
+    );
+  }
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -76,6 +94,19 @@ async function createWindow(): Promise<void> {
     },
   });
   mainWindow.removeMenu();
+  systemIntegration = new SystemIntegration(mainWindow, (conversationId) => {
+    mainWindow?.webContents.send("app:open-conversation", conversationId);
+  });
+  if (restoreFailure) {
+    await dialog.showMessageBox(mainWindow, {
+      type: "warning",
+      title: useChinese ? "备份恢复失败" : "Backup restore failed",
+      message: useChinese
+        ? "计划中的备份恢复未能完成，AIHub 将继续使用恢复前的数据。"
+        : "The scheduled backup restore could not be completed. AIHub will continue with the data from before the restore.",
+      detail: restoreFailure,
+    });
+  }
   mainWindow.once("ready-to-show", () => mainWindow?.show());
   mainWindow.webContents.on(
     "did-fail-load",
@@ -95,17 +126,67 @@ async function createWindow(): Promise<void> {
     },
   );
 
-  database = new AppDatabase(path.join(app.getPath("userData"), "aihub.sqlite"));
+  try {
+    database = new AppDatabase(
+      path.join(app.getPath("userData"), "aihub.sqlite"),
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    await logBootstrap(`database:open-failed error=${detail}`);
+    await dialog.showMessageBox(mainWindow, {
+      type: "error",
+      title: useChinese ? "无法打开本地数据" : "Local data could not be opened",
+      message: useChinese
+        ? "数据库可能来自更新版本或已损坏。AIHub 未修改该数据库。"
+        : "The database may come from a newer version or be damaged. AIHub did not modify it.",
+      detail,
+    });
+    systemIntegration.destroy();
+    mainWindow.destroy();
+    mainWindow = undefined;
+    systemIntegration = undefined;
+    app.quit();
+    return;
+  }
   await logBootstrap(`database:opened path=${path.join(app.getPath("userData"), "aihub.sqlite")}`);
-  service = new AppService(mainWindow, database, userDataDir);
-  registerIpc(service);
+  updateService = new UpdateService({
+    beforeInstall: async () => {
+      await service?.createPreUpdateBackup();
+      systemIntegration?.prepareToQuit();
+    },
+    onState: (state) => {
+      mainWindow?.webContents.send("app:update-state", state);
+      if (state.status === "available" && state.availableVersion) {
+        systemIntegration?.notifyUpdateAvailable(state.availableVersion);
+      }
+    },
+  });
+  service = new AppService(mainWindow, database, userDataDir, {
+    enableScheduledBackups: process.env.AIHUB_TEST_MODE !== "1",
+    requestRestart: () => {
+      systemIntegration?.prepareToQuit();
+      app.relaunch();
+      app.exit(0);
+    },
+    onSettingsChanged: (settings) => {
+      systemIntegration?.apply(settings);
+      updateService?.applyPolicy(settings.updatePolicy ?? "notify");
+    },
+    notify: (notification) => systemIntegration?.notify(notification),
+  });
+  registerIpc(service, updateService);
   mainWindow.on("resize", () => service?.layout());
+  mainWindow.on("close", (event) => systemIntegration?.handleWindowClose(event));
   mainWindow.on("closed", () => {
     stopProviderSmokeMonitor();
     service?.destroy();
     database?.close();
+    systemIntegration?.destroy();
+    updateService?.destroy();
     service = undefined;
     database = undefined;
+    systemIntegration = undefined;
+    updateService = undefined;
     mainWindow = undefined;
   });
 
@@ -151,6 +232,8 @@ if (hasSingleInstanceLock) {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
+app.on("before-quit", () => systemIntegration?.prepareToQuit());
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) void createWindow();

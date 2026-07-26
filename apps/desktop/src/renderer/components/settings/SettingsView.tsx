@@ -3,10 +3,12 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowUp,
+  ArchiveRestore,
   BookOpen,
   Database,
   Download,
   FolderPlus,
+  HardDriveDownload,
   GripVertical,
   Info,
   Keyboard,
@@ -23,10 +25,15 @@ import {
 } from "lucide-react";
 import {
   PROVIDER_LABELS,
+  type DataImportPreview,
   type DataStorageSummary,
+  type BackupManifestV1,
+  type BackupRestorePreview,
   type ProviderId,
   type SettingsImportPreview,
   type UiScale,
+  type TrashItem,
+  type UpdateState,
 } from "@aihub/core";
 import { useI18n, type TranslationKey } from "../../i18n";
 import {
@@ -34,7 +41,7 @@ import {
   useAppStore,
   useSelectedConversation,
 } from "../../stores/app-store";
-import { confirmDialog } from "../../stores/dialog-store";
+import { confirmDialog, inputDialog } from "../../stores/dialog-store";
 import {
   DEFAULT_SHORTCUTS,
   type ShortcutAction,
@@ -64,12 +71,38 @@ const NAV_ITEMS: Array<{
   { id: "about", label: "settings.about", icon: Info },
 ];
 
+const BACKUP_REASON_KEYS: Record<
+  BackupManifestV1["reason"],
+  TranslationKey
+> = {
+  manual: "settings.backupReason.manual",
+  scheduled: "settings.backupReason.scheduled",
+  "pre-restore": "settings.backupReason.preRestore",
+  "pre-reset": "settings.backupReason.preReset",
+  "pre-update": "settings.backupReason.preUpdate",
+};
+
+const TRASH_TYPE_KEYS: Record<TrashItem["type"], TranslationKey> = {
+  conversation: "settings.trashType.conversation",
+  folder: "settings.trashType.folder",
+  tag: "settings.trashType.tag",
+  "system-prompt": "settings.trashType.prompt",
+  document: "settings.trashType.document",
+};
+
 export function SettingsView() {
   const { t } = useI18n();
   const section = useAppStore((state) => state.settingsSection);
   const setSection = useAppStore((state) => state.setSettingsSection);
   const closeSettings = useAppStore((state) => state.closeSettings);
   const syncError = useSettingsStore((state) => state.syncError);
+  const addToast = useToastStore((state) => state.addToast);
+
+  useEffect(() => {
+    if (syncError) {
+      addToast(t("settings.saveFailed", { error: syncError }), "error");
+    }
+  }, [addToast, syncError, t]);
 
   return (
     <main
@@ -89,7 +122,9 @@ export function SettingsView() {
         <div>
           <h1 className="text-lg font-semibold">{t("settings.title")}</h1>
           {syncError && (
-            <p className="text-xs text-[var(--color-danger-text)]">{syncError}</p>
+            <p className="text-xs text-[var(--color-danger-text)]">
+              {t("settings.saveFailed", { error: syncError })}
+            </p>
           )}
         </div>
       </header>
@@ -190,6 +225,74 @@ function GeneralSection() {
           checked={settings.autoSyncWebHistory}
           onChange={settings.setAutoSyncWebHistory}
         />
+        <ToggleSetting
+          label={t("settings.tray")}
+          description={t("settings.trayDescription")}
+          checked={settings.trayEnabled}
+          onChange={settings.setTrayEnabled}
+        />
+        {settings.trayEnabled && (
+          <SelectSetting
+            label={t("settings.closeBehavior")}
+            value={settings.closeBehavior}
+            onChange={(value) =>
+              settings.setCloseBehavior(
+                value as "exit" | "minimize-to-tray",
+              )
+            }
+            options={[
+              ["exit", t("settings.closeBehavior.exit")],
+              ["minimize-to-tray", t("settings.closeBehavior.tray")],
+            ]}
+          />
+        )}
+        <ToggleSetting
+          label={t("settings.launchAtLogin")}
+          checked={settings.launchAtLogin}
+          onChange={settings.setLaunchAtLogin}
+        />
+        <div className="rounded-xl border border-[var(--color-border)] p-4">
+          <h3 className="mb-3 text-sm font-semibold">
+            {t("settings.notifications")}
+          </h3>
+          <div className="grid gap-4">
+            <ToggleSetting
+              label={t("settings.notificationCompleted")}
+              checked={settings.notificationPreferences.generationCompleted}
+              onChange={(enabled) =>
+                settings.setNotificationPreference(
+                  "generationCompleted",
+                  enabled,
+                )
+              }
+            />
+            <ToggleSetting
+              label={t("settings.notificationFailed")}
+              checked={settings.notificationPreferences.generationFailed}
+              onChange={(enabled) =>
+                settings.setNotificationPreference(
+                  "generationFailed",
+                  enabled,
+                )
+              }
+            />
+            <ToggleSetting
+              label={t("settings.notificationSyncFailed")}
+              checked={settings.notificationPreferences.syncFailed}
+              onChange={(enabled) =>
+                settings.setNotificationPreference("syncFailed", enabled)
+              }
+            />
+            <ToggleSetting
+              label={t("settings.notificationPreview")}
+              description={t("settings.notificationPreviewDescription")}
+              checked={settings.notificationPreferences.showPreview}
+              onChange={(enabled) =>
+                settings.setNotificationPreference("showPreview", enabled)
+              }
+            />
+          </div>
+        </div>
       </div>
     </>
   );
@@ -265,6 +368,20 @@ function AppearanceSection() {
             ["system", t("settings.motion.system")],
             ["reduced", t("settings.motion.reduced")],
             ["full", t("settings.motion.full")],
+          ]}
+        />
+        <SelectSetting
+          label={t("settings.contrast")}
+          value={settings.contrastMode}
+          onChange={(value) =>
+            settings.setContrastMode(
+              value as "system" | "standard" | "high",
+            )
+          }
+          options={[
+            ["system", t("settings.contrast.system")],
+            ["standard", t("settings.contrast.standard")],
+            ["high", t("settings.contrast.high")],
           ]}
         />
         <button
@@ -454,7 +571,7 @@ function ConversationSection() {
       })
     ) {
       if (await deleteFolder(id)) {
-        addToast(t("toast.deleted"), "success");
+        addToast(t("toast.movedToTrash"), "success");
       }
     }
   }
@@ -468,7 +585,7 @@ function ConversationSection() {
       })
     ) {
       if (await deleteTag(id)) {
-        addToast(t("toast.deleted"), "success");
+        addToast(t("toast.movedToTrash"), "success");
       }
     }
   }
@@ -583,7 +700,7 @@ function KnowledgeSection() {
       })
     ) {
       if (await removeDocument(id)) {
-        useToastStore.getState().addToast(t("toast.deleted"), "success");
+        useToastStore.getState().addToast(t("toast.movedToTrash"), "success");
       }
     }
   }
@@ -744,18 +861,35 @@ function DataSection() {
   const { t, locale } = useI18n();
   const settings = useSettingsStore();
   const addToast = useToastStore((state) => state.addToast);
+  const refreshLibraryData = useAppStore((state) => state.refreshLibraryData);
+  const refreshSystemPrompts = useAppStore(
+    (state) => state.refreshSystemPrompts,
+  );
   const [summary, setSummary] = useState<DataStorageSummary>();
+  const [backups, setBackups] = useState<BackupManifestV1[]>([]);
+  const [trash, setTrash] = useState<TrashItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [dataBusy, setDataBusy] = useState(false);
   const [preview, setPreview] = useState<SettingsImportPreview>();
+  const [restorePreview, setRestorePreview] =
+    useState<BackupRestorePreview>();
+  const [dataImportPreview, setDataImportPreview] =
+    useState<DataImportPreview>();
   const [importJson, setImportJson] = useState("");
 
   useEffect(() => {
     let active = true;
     setLoading(true);
-    void window.aihub
-      .getStorageSummary()
-      .then((value) => {
-        if (active) setSummary(value);
+    void Promise.all([
+      window.aihub.getStorageSummary(),
+      window.aihub.listBackups(),
+      window.aihub.listTrash(),
+    ])
+      .then(([storage, backupItems, trashItems]) => {
+        if (!active) return;
+        setSummary(storage);
+        setBackups(backupItems);
+        setTrash(trashItems);
       })
       .catch((cause) => addToast(errorText(cause), "error"))
       .finally(() => {
@@ -765,6 +899,154 @@ function DataSection() {
       active = false;
     };
   }, [addToast]);
+
+  async function refreshDataControls() {
+    const [storage, backupItems, trashItems] = await Promise.all([
+      window.aihub.getStorageSummary(),
+      window.aihub.listBackups(),
+      window.aihub.listTrash(),
+    ]);
+    setSummary(storage);
+    setBackups(backupItems);
+    setTrash(trashItems);
+  }
+
+  async function createBackup() {
+    setDataBusy(true);
+    try {
+      await window.aihub.createBackup();
+      await refreshDataControls();
+      addToast(t("settings.backupCreated"), "success");
+    } catch (cause) {
+      addToast(errorText(cause), "error");
+    } finally {
+      setDataBusy(false);
+    }
+  }
+
+  async function deleteBackup(backup: BackupManifestV1) {
+    if (
+      !(await confirmDialog({
+        title: t("settings.deleteBackupTitle"),
+        description: t("settings.deleteBackupDescription"),
+        destructive: true,
+      }))
+    ) {
+      return;
+    }
+    try {
+      await window.aihub.deleteBackup(backup.id);
+      await refreshDataControls();
+      addToast(t("settings.backupDeleted"), "success");
+    } catch (cause) {
+      addToast(errorText(cause), "error");
+    }
+  }
+
+  async function previewRestore(backup: BackupManifestV1) {
+    try {
+      setRestorePreview(await window.aihub.previewBackupRestore(backup.id));
+    } catch (cause) {
+      addToast(errorText(cause), "error");
+    }
+  }
+
+  async function applyRestore() {
+    if (!restorePreview) return;
+    setDataBusy(true);
+    try {
+      await window.aihub.restoreBackup(restorePreview.backup.id);
+      setRestorePreview(undefined);
+      addToast(t("settings.restoreScheduled"), "success", 8_000);
+    } catch (cause) {
+      addToast(errorText(cause), "error");
+      setDataBusy(false);
+    }
+  }
+
+  async function restoreTrashItem(item: TrashItem) {
+    try {
+      await window.aihub.restoreTrash(item.type, item.id);
+      await Promise.all([
+        refreshDataControls(),
+        refreshLibraryData(),
+        refreshSystemPrompts(),
+      ]);
+      addToast(t("settings.trashRestored"), "success");
+    } catch (cause) {
+      addToast(errorText(cause), "error");
+    }
+  }
+
+  async function purgeTrashItem(item: TrashItem) {
+    if (
+      !(await confirmDialog({
+        title: t("settings.purgeTrashTitle"),
+        description: t("settings.purgeTrashDescription"),
+        destructive: true,
+      }))
+    ) {
+      return;
+    }
+    try {
+      await window.aihub.purgeTrash(item.type, item.id);
+      await refreshDataControls();
+      addToast(t("settings.trashPurged"), "success");
+    } catch (cause) {
+      addToast(errorText(cause), "error");
+    }
+  }
+
+  async function emptyTrash() {
+    if (
+      !(await confirmDialog({
+        title: t("settings.emptyTrashTitle"),
+        description: t("settings.emptyTrashDescription"),
+        destructive: true,
+      }))
+    ) {
+      return;
+    }
+    try {
+      await window.aihub.emptyTrash();
+      await refreshDataControls();
+      addToast(t("settings.trashEmptied"), "success");
+    } catch (cause) {
+      addToast(errorText(cause), "error");
+    }
+  }
+
+  async function resetData(
+    scope: "local-content" | "provider-sessions" | "everything",
+  ) {
+    const confirmation = await inputDialog({
+      title: t("settings.resetDataTitle"),
+      description:
+        scope === "local-content"
+          ? t("settings.resetLocalContentDescription")
+          : scope === "provider-sessions"
+            ? t("settings.resetProviderSessionsDescription")
+            : t("settings.resetEverythingDescription"),
+      placeholder: "AIHub",
+      confirmLabel: t("common.clear"),
+    });
+    if (confirmation !== "AIHub") {
+      if (confirmation !== undefined) {
+        addToast(t("settings.resetConfirmationMismatch"), "warning");
+      }
+      return;
+    }
+    try {
+      await window.aihub.resetData({
+        scope,
+        confirmation: "AIHub",
+        createBackup: scope !== "provider-sessions",
+      });
+      addToast(t("settings.resetScheduled"), "success", 8_000);
+    } catch (cause) {
+      addToast(errorText(cause), "error");
+    }
+  }
 
   async function previewImport(json: string) {
     try {
@@ -784,6 +1066,44 @@ function DataSection() {
       addToast(t("settings.imported"), "success");
     } catch (cause) {
       addToast(errorText(cause), "error");
+    }
+  }
+
+  async function previewDataImport() {
+    setDataBusy(true);
+    try {
+      const next = await window.aihub.previewDataImport();
+      if (!next.canceled) setDataImportPreview(next);
+    } catch (cause) {
+      addToast(errorText(cause), "error");
+    } finally {
+      setDataBusy(false);
+    }
+  }
+
+  async function applyDataImport() {
+    const token = dataImportPreview?.token;
+    if (!token) return;
+    setDataBusy(true);
+    try {
+      const result = await window.aihub.importAllData(token);
+      setDataImportPreview(undefined);
+      await Promise.all([
+        refreshDataControls(),
+        refreshLibraryData(),
+        refreshSystemPrompts(),
+      ]);
+      addToast(
+        t("settings.dataImported", {
+          conversations: result.conversationCount,
+          messages: result.messageCount,
+        }),
+        "success",
+      );
+    } catch (cause) {
+      addToast(errorText(cause), "error");
+    } finally {
+      setDataBusy(false);
     }
   }
 
@@ -834,6 +1154,158 @@ function DataSection() {
           value={formatBytes(summary?.documentBytes ?? 0, locale)}
         />
       </div>
+      <section className="mb-8 rounded-xl border border-[var(--color-border)] p-4">
+        <h3 className="text-base font-semibold">{t("settings.backupTitle")}</h3>
+        <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
+          {t("settings.backupDescription")}
+        </p>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <ToggleSetting
+            label={t("settings.automaticBackup")}
+            checked={settings.automaticBackup}
+            onChange={settings.setAutomaticBackup}
+          />
+          <SelectSetting
+            label={t("settings.backupRetention")}
+            value={String(settings.backupRetentionDays)}
+            onChange={(value) =>
+              settings.setBackupRetentionDays(
+                Number(value) as 7 | 30 | 90 | 365,
+              )
+            }
+            options={([7, 30, 90, 365] as const).map((days) => [
+              String(days),
+              t("settings.retentionDays", { count: days }),
+            ])}
+          />
+          <SelectSetting
+            label={t("settings.trashRetention")}
+            value={String(settings.trashRetentionDays)}
+            onChange={(value) =>
+              settings.setTrashRetentionDays(
+                Number(value) as 0 | 7 | 30 | 90,
+              )
+            }
+            options={[
+              ["7", t("settings.retentionDays", { count: 7 })],
+              ["30", t("settings.retentionDays", { count: 30 })],
+              ["90", t("settings.retentionDays", { count: 90 })],
+              ["0", t("settings.retentionForever")],
+            ]}
+          />
+        </div>
+        <button
+          type="button"
+          className="mt-4 flex items-center gap-2 rounded-lg bg-[var(--color-send-bg)] px-3 py-2 text-sm font-semibold text-[var(--color-send-text)] disabled:opacity-40"
+          disabled={dataBusy}
+          onClick={() => void createBackup()}
+        >
+          <HardDriveDownload size={15} />
+          {t("settings.createBackup")}
+        </button>
+        <div className="mt-4 grid gap-2">
+          {backups.length === 0 ? (
+            <p className="text-sm text-[var(--color-text-tertiary)]">
+              {t("settings.noBackups")}
+            </p>
+          ) : (
+            backups.map((backup) => (
+              <div
+                key={backup.id}
+                className="flex flex-wrap items-center gap-3 rounded-lg bg-[var(--color-bg-soft)] px-3 py-2"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium">
+                    {new Date(backup.createdAt).toLocaleString(locale)}
+                  </p>
+                  <p className="text-xs text-[var(--color-text-tertiary)]">
+                    {t(BACKUP_REASON_KEYS[backup.reason])} ·{" "}
+                    {formatBytes(backup.databaseBytes, locale)}
+                    {" · "}
+                    {backup.conversationCount.toLocaleString(locale)}{" "}
+                    {t("settings.conversationCount")}
+                  </p>
+                </div>
+                <SmallButton
+                  label={t("settings.restoreBackup")}
+                  onClick={() => void previewRestore(backup)}
+                />
+                <SmallButton
+                  label={t("settings.deleteBackup")}
+                  danger
+                  onClick={() => void deleteBackup(backup)}
+                />
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+      <section className="mb-8 rounded-xl border border-[var(--color-border)] p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-base font-semibold">
+              {t("settings.trashTitle")}
+            </h3>
+            <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
+              {t("settings.trashDescription")}
+            </p>
+          </div>
+          {trash.length > 0 && (
+            <SmallButton
+              label={t("settings.emptyTrash")}
+              danger
+              onClick={() => void emptyTrash()}
+            />
+          )}
+        </div>
+        <div className="mt-4 grid gap-2">
+          {trash.length === 0 ? (
+            <p className="text-sm text-[var(--color-text-tertiary)]">
+              {t("settings.noTrash")}
+            </p>
+          ) : (
+            trash.map((item) => {
+              const purgeAt =
+                settings.trashRetentionDays > 0
+                  ? new Date(
+                      new Date(item.deletedAt).getTime() +
+                        settings.trashRetentionDays * 24 * 60 * 60 * 1_000,
+                    ).toISOString()
+                  : undefined;
+              return (
+                <div
+                  key={`${item.type}:${item.id}`}
+                  className="flex flex-wrap items-center gap-3 rounded-lg bg-[var(--color-bg-soft)] px-3 py-2"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{item.label}</p>
+                    <p className="text-xs text-[var(--color-text-tertiary)]">
+                      {t(TRASH_TYPE_KEYS[item.type])} ·{" "}
+                      {new Date(item.deletedAt).toLocaleString(locale)}
+                    </p>
+                    <p className="text-xs text-[var(--color-text-tertiary)]">
+                      {purgeAt
+                        ? t("settings.trashExpiresAt", {
+                            date: new Date(purgeAt).toLocaleString(locale),
+                          })
+                        : t("settings.trashKeptForever")}
+                    </p>
+                  </div>
+                  <SmallButton
+                    label={t("settings.restoreTrash")}
+                    onClick={() => void restoreTrashItem(item)}
+                  />
+                  <SmallButton
+                    label={t("settings.purgeTrash")}
+                    danger
+                    onClick={() => void purgeTrashItem(item)}
+                  />
+                </div>
+              );
+            })
+          )}
+        </div>
+      </section>
       <div className="flex flex-wrap gap-2">
         <ActionButton
           icon={<Database size={15} />}
@@ -862,6 +1334,11 @@ function DataSection() {
               })
               .catch((cause) => addToast(errorText(cause), "error"))
           }
+        />
+        <ActionButton
+          icon={<Upload size={15} />}
+          label={t("settings.importAll")}
+          onClick={() => void previewDataImport()}
         />
         <ActionButton
           icon={<Download size={15} />}
@@ -902,6 +1379,111 @@ function DataSection() {
       >
         {t("settings.resetAll")}
       </button>
+      <div className="mt-8 flex flex-wrap gap-2">
+        <ActionButton
+          icon={<Trash2 size={15} />}
+          label={t("settings.resetLocalContent")}
+          onClick={() => void resetData("local-content")}
+        />
+        <ActionButton
+          icon={<Trash2 size={15} />}
+          label={t("settings.resetProviderSessions")}
+          onClick={() => void resetData("provider-sessions")}
+        />
+        <button
+          type="button"
+          className="flex items-center gap-2 rounded-lg border border-[var(--color-danger)] px-3 py-2 text-sm text-[var(--color-danger-text)] hover:bg-[var(--color-danger-bg)]"
+          onClick={() => void resetData("everything")}
+        >
+          <Trash2 size={15} />
+          {t("settings.resetEverything")}
+        </button>
+      </div>
+      <Dialog
+        open={Boolean(dataImportPreview)}
+        onClose={() => setDataImportPreview(undefined)}
+        title={t("settings.previewDataImport")}
+        description={t("settings.dataImportDescription")}
+        widthClass="w-[min(680px,calc(100vw-48px))]"
+      >
+        {dataImportPreview && (
+          <>
+            <p className="mb-3 text-sm font-medium">
+              {dataImportPreview.fileName}
+            </p>
+            <div className="grid gap-2 rounded-lg border border-[var(--color-border)] p-3 text-sm sm:grid-cols-2">
+              <Metric
+                label={t("settings.conversationCount")}
+                value={(dataImportPreview.conversationCount ?? 0).toLocaleString(
+                  locale,
+                )}
+              />
+              <Metric
+                label={t("settings.messageCount")}
+                value={(dataImportPreview.messageCount ?? 0).toLocaleString(
+                  locale,
+                )}
+              />
+              <Metric
+                label={t("settings.folders")}
+                value={(dataImportPreview.folderCount ?? 0).toLocaleString(
+                  locale,
+                )}
+              />
+              <Metric
+                label={t("settings.tags")}
+                value={(dataImportPreview.tagCount ?? 0).toLocaleString(locale)}
+              />
+              <Metric
+                label={t("settings.prompts")}
+                value={(
+                  dataImportPreview.systemPromptCount ?? 0
+                ).toLocaleString(locale)}
+              />
+              <Metric
+                label={t("settings.dataImportConflicts")}
+                value={(dataImportPreview.conflictCount ?? 0).toLocaleString(
+                  locale,
+                )}
+              />
+              <Metric
+                label={t("settings.dataImportIgnoredDocuments")}
+                value={(
+                  dataImportPreview.ignoredKnowledgeDocumentCount ?? 0
+                ).toLocaleString(locale)}
+              />
+              <Metric
+                label={t("settings.dataImportAdjustedDefaults")}
+                value={(
+                  dataImportPreview.adjustedDefaultPromptCount ?? 0
+                ).toLocaleString(locale)}
+              />
+            </div>
+            {dataImportPreview.warnings?.map((warning) => (
+              <p
+                key={warning}
+                className="mt-3 rounded-lg bg-[var(--color-warning-bg)] px-3 py-2 text-xs"
+              >
+                {warning}
+              </p>
+            ))}
+          </>
+        )}
+        <div className="mt-5 flex justify-end gap-2">
+          <SmallButton
+            label={t("common.cancel")}
+            onClick={() => setDataImportPreview(undefined)}
+          />
+          <button
+            type="button"
+            disabled={dataBusy || !dataImportPreview?.token}
+            className="rounded-lg bg-[var(--color-send-bg)] px-4 py-2 text-sm font-semibold text-[var(--color-send-text)] disabled:opacity-40"
+            onClick={() => void applyDataImport()}
+          >
+            {t("common.confirm")}
+          </button>
+        </div>
+      </Dialog>
       <Dialog
         open={Boolean(preview)}
         onClose={() => setPreview(undefined)}
@@ -965,12 +1547,116 @@ function DataSection() {
           </button>
         </div>
       </Dialog>
+      <Dialog
+        open={Boolean(restorePreview)}
+        onClose={() => setRestorePreview(undefined)}
+        title={t("settings.restoreBackupTitle")}
+        description={t("settings.restoreBackupDescription")}
+        widthClass="w-[min(620px,calc(100vw-48px))]"
+      >
+        {restorePreview && (
+          <>
+            <div className="grid gap-2 rounded-lg border border-[var(--color-border)] p-3 text-sm sm:grid-cols-2">
+              <Metric
+                label={t("settings.conversationCount")}
+                value={`${restorePreview.current.conversationCount.toLocaleString(locale)} → ${restorePreview.backup.conversationCount.toLocaleString(locale)}`}
+              />
+              <Metric
+                label={t("settings.messageCount")}
+                value={`${restorePreview.current.messageCount.toLocaleString(locale)} → ${restorePreview.backup.messageCount.toLocaleString(locale)}`}
+              />
+              <Metric
+                label={t("settings.documentCount")}
+                value={`${restorePreview.current.documentCount.toLocaleString(locale)} → ${restorePreview.backup.documentCount.toLocaleString(locale)}`}
+              />
+              <Metric
+                label={t("settings.databaseSize")}
+                value={formatBytes(
+                  restorePreview.backup.databaseBytes,
+                  locale,
+                )}
+              />
+            </div>
+            {restorePreview.warnings.map((warning) => (
+              <p
+                key={warning}
+                className="mt-3 rounded-lg bg-[var(--color-warning-bg)] px-3 py-2 text-xs"
+              >
+                {warning}
+              </p>
+            ))}
+          </>
+        )}
+        <div className="mt-5 flex justify-end gap-2">
+          <SmallButton
+            label={t("common.cancel")}
+            onClick={() => setRestorePreview(undefined)}
+          />
+          <button
+            type="button"
+            disabled={dataBusy}
+            className="flex items-center gap-2 rounded-lg bg-[var(--color-danger)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+            onClick={() => void applyRestore()}
+          >
+            <ArchiveRestore size={15} />
+            {t("settings.restoreBackup")}
+          </button>
+        </div>
+      </Dialog>
     </>
   );
 }
 
 function AboutSection() {
   const { t } = useI18n();
+  const settings = useSettingsStore();
+  const addToast = useToastStore((state) => state.addToast);
+  const [update, setUpdate] = useState<UpdateState>();
+
+  useEffect(() => {
+    void window.aihub
+      .getUpdateState()
+      .then(setUpdate)
+      .catch((cause) => addToast(errorText(cause), "error"));
+    return window.aihub.onUpdateState(setUpdate);
+  }, [addToast]);
+
+  async function runUpdateAction(
+    action: "check" | "download" | "install",
+  ) {
+    try {
+      if (action === "install") {
+        await window.aihub.installUpdate();
+        return;
+      }
+      setUpdate(
+        action === "check"
+          ? await window.aihub.checkForUpdates()
+          : await window.aihub.downloadUpdate(),
+      );
+    } catch (cause) {
+      addToast(errorText(cause), "error");
+    }
+  }
+
+  const statusText =
+    update?.status === "checking"
+      ? t("settings.update.checking")
+      : update?.status === "available"
+        ? t("settings.update.available", {
+            version: update.availableVersion ?? "—",
+          })
+        : update?.status === "downloading"
+          ? t("settings.update.downloading")
+          : update?.status === "downloaded"
+            ? t("settings.update.downloaded")
+            : update?.status === "not-available"
+              ? t("settings.update.current")
+              : update?.status === "error"
+                ? t("settings.update.error", {
+                    error: update.error ?? t("common.failed"),
+                  })
+                : "";
   return (
     <>
       <SectionTitle
@@ -978,8 +1664,53 @@ function AboutSection() {
         description={t("settings.aboutDescription")}
       />
       <div className="space-y-3 rounded-xl border border-[var(--color-border)] p-5 text-sm leading-6 text-[var(--color-text-secondary)]">
-        <p>AIHub 0.1.0</p>
+        <p>AIHub {update?.currentVersion ?? "0.1.0"}</p>
         <p>{t("settings.localDataDescription")}</p>
+      </div>
+      <div className="mt-5 grid gap-4 rounded-xl border border-[var(--color-border)] p-5">
+        <SelectSetting
+          label={t("settings.updatePolicy")}
+          value={settings.updatePolicy}
+          onChange={(value) =>
+            settings.setUpdatePolicy(
+              value as "manual" | "notify" | "auto-download",
+            )
+          }
+          options={[
+            ["manual", t("settings.update.manual")],
+            ["notify", t("settings.update.notify")],
+            ["auto-download", t("settings.update.autoDownload")],
+          ]}
+        />
+        {statusText && (
+          <p
+            aria-live="polite"
+            className="text-sm text-[var(--color-text-secondary)]"
+          >
+            {statusText}
+          </p>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <ActionButton
+            icon={<RefreshCw size={15} />}
+            label={t("settings.checkUpdates")}
+            onClick={() => void runUpdateAction("check")}
+          />
+          {update?.status === "available" && (
+            <ActionButton
+              icon={<Download size={15} />}
+              label={t("settings.downloadUpdate")}
+              onClick={() => void runUpdateAction("download")}
+            />
+          )}
+          {update?.status === "downloaded" && (
+            <ActionButton
+              icon={<ArchiveRestore size={15} />}
+              label={t("settings.installUpdate")}
+              onClick={() => void runUpdateAction("install")}
+            />
+          )}
+        </div>
       </div>
     </>
   );

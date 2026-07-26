@@ -455,7 +455,6 @@ export class ProviderRuntime implements ProviderClient {
       authenticated: false,
       ready: false,
       degraded: false,
-      reason: "Provider website data was cleared.",
     };
   }
 

@@ -17,6 +17,17 @@
 
 任何例外必须由产品负责人明确批准，并重新运行受影响测试及全部 P0 发布门禁。
 
+## 已批准的 P2 例外
+
+2026-07-26，产品负责人明确指示“开启 P2”。P2 可靠性与系统集成改造在
+`codex/p2-reliability-integration` 分支独立进行，范围以
+[`docs/plans/aihub-p2-reliability-integration.md`](plans/aihub-p2-reliability-integration.md)
+为准。
+
+该批准不会自动放宽 0.1.0 RC 的发布门禁。P2 合入发布分支前仍须完成全量
+TypeScript、Vitest、Electron E2E、生产 package/make，以及带正式证书的更新
+构建验证。
+
 ## 0.1.0 发布硬门禁
 
 - `pnpm install --frozen-lockfile`。

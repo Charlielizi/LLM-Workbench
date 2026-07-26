@@ -62,7 +62,7 @@ export function ConversationContextMenu({
     });
     if (!confirmed) return;
     if (await deleteConversation(conversation.id)) {
-      addToast(t("toast.deleted"), "success");
+      addToast(t("toast.movedToTrash"), "success");
     }
   }
 

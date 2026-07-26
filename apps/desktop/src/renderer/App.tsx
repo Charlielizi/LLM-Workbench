@@ -50,6 +50,7 @@ export function App() {
     (state) => state.activeComparisonId,
   );
   const workspaceView = useAppStore((state) => state.workspaceView);
+  const selectConversation = useAppStore((state) => state.selectConversation);
 
   useEffect(() => {
     void initialize();
@@ -59,6 +60,14 @@ export function App() {
   useEffect(() => {
     void initializeSettings();
   }, [initializeSettings]);
+
+  useEffect(
+    () =>
+      window.aihub.onOpenConversation((conversationId) => {
+        selectConversation(conversationId);
+      }),
+    [selectConversation],
+  );
 
   useEffect(() => {
     if (!syncError) {

@@ -64,7 +64,10 @@ test("persists appearance settings and keeps disabled-provider history usable", 
     .selectOption("1.1");
   await settings.getByText("Density").locator("..").getByRole("combobox")
     .selectOption("compact");
+  await settings.getByText("Contrast").locator("..").getByRole("combobox")
+    .selectOption("high");
   await expect(page.locator("html")).toHaveAttribute("data-density", "compact");
+  await expect(page.locator("html")).toHaveAttribute("data-contrast", "high");
 
   await settings.getByRole("button", { name: "Providers & sync" }).click();
   await settings.getByLabel("Enabled ChatGPT").uncheck();
@@ -88,6 +91,7 @@ test("persists appearance settings and keeps disabled-provider history usable", 
         return {
           uiScale: value.uiScale,
           density: value.density,
+          contrastMode: value.contrastMode,
           defaultProvider: value.defaultProvider,
           enabledProviders: value.enabledProviders,
         };
@@ -96,6 +100,7 @@ test("persists appearance settings and keeps disabled-provider history usable", 
     .toEqual({
       uiScale: 1.1,
       density: "compact",
+      contrastMode: "high",
       defaultProvider: "claude",
       enabledProviders: [
         "claude",
@@ -116,8 +121,42 @@ test("does not execute a destructive action when confirmation is canceled", asyn
   await conversation.click({ button: "right" });
   await page.getByRole("button", { name: "Delete" }).last().click();
   const confirmation = page.getByRole("dialog");
-  await expect(confirmation).toContainText("permanently deleted");
+  await expect(confirmation).toContainText("move to Trash");
   await confirmation.getByRole("button", { name: "Cancel" }).click();
+  await expect(conversation).toBeVisible();
+});
+
+test("moves a conversation to Trash, restores it, and creates a verified backup", async ({
+  page,
+}) => {
+  await completeOnboarding(page);
+  await createChat(page);
+
+  const conversation = page.locator('[data-testid^="conversation-item-"]').first();
+  await conversation.click({ button: "right" });
+  await page.getByRole("button", { name: "Delete" }).last().click();
+  const confirmation = page.getByRole("dialog");
+  await expect(confirmation).toContainText("move to Trash");
+  await confirmation.getByRole("button", { name: "Delete" }).click();
+  await expect(conversation).toBeHidden();
+
+  await page.getByTitle("Settings").last().click();
+  const settings = page.getByTestId("settings-view");
+  await settings.getByRole("button", { name: "Data & privacy" }).click();
+  await expect(
+    settings.getByText("New ChatGPT conversation", { exact: true }),
+  ).toBeVisible();
+  await expect(settings.getByText(/Automatic cleanup:/)).toBeVisible();
+  await settings.getByRole("button", { name: "Restore", exact: true }).click();
+  await expect(settings.getByText("Trash is empty")).toBeVisible();
+
+  await settings.getByRole("button", { name: "Back up now" }).click();
+  await expect(
+    settings.getByRole("button", { name: "Restore", exact: true }),
+  ).toBeVisible();
+  await expect(settings.getByText("Manual", { exact: false })).toBeVisible();
+
+  await settings.getByTitle("Back to workspace").click();
   await expect(conversation).toBeVisible();
 });
 
@@ -194,6 +233,25 @@ test("exports a valid privacy-filtered V1 data file", async ({
   expect(exported).not.toContain("localPath");
   expect(exported).not.toContain("providerApiConfigs");
   expect(exported).not.toContain("cookie");
+
+  await electronApp.evaluate(({ dialog }, source) => {
+    dialog.showOpenDialog = async () => ({
+      canceled: false,
+      filePaths: [source],
+    });
+  }, exportPath);
+  await settings.getByRole("button", { name: "Import all conversations" })
+    .click();
+  const importPreview = page.getByRole("dialog");
+  await expect(importPreview).toContainText("e2e-aihub-data.json");
+  await expect(importPreview).toContainText("Conflicts (will be skipped)");
+  await expect(importPreview).toContainText(
+    "merge mode and never overwrites existing records",
+  );
+  await importPreview.getByRole("button", { name: "Confirm" }).click();
+  await expect(importPreview).toBeHidden();
+  await expect(page.getByText(/Imported 0 conversations and 0 messages/))
+    .toBeVisible();
 });
 
 test("renders provider failures and allows the same UI to recover", async ({ page }) => {

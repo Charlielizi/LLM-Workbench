@@ -163,16 +163,26 @@ export async function launchTestElectron(
   historyFixtureProvider: ProviderId | null,
   runId: string,
 ): Promise<ElectronApplication> {
+  const packagedExecutable = process.env.AIHUB_E2E_PACKAGED_EXE?.trim();
   const mainPath = path.resolve(process.cwd(), ".vite/build/main.js");
-  if (!existsSync(mainPath)) {
+  if (packagedExecutable && !existsSync(packagedExecutable)) {
+    throw new Error(
+      `Packaged Electron executable is missing at ${packagedExecutable}.`,
+    );
+  }
+  if (!packagedExecutable && !existsSync(mainPath)) {
     throw new Error(
       `Electron test build is missing at ${mainPath}. Run the desktop build first.`,
     );
   }
-  const electronExecutable = require("electron") as string;
+  const electronExecutable =
+    packagedExecutable ?? (require("electron") as string);
   return electron.launch({
     executablePath: electronExecutable,
-    args: [`--user-data-dir=${testUserData}`, mainPath],
+    args: [
+      `--user-data-dir=${testUserData}`,
+      ...(packagedExecutable ? [] : [mainPath]),
+    ],
     env: {
       ...process.env,
       AIHUB_TEST_MODE: "1",

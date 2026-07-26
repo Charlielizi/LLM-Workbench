@@ -20,6 +20,20 @@ describe("normalizeAppSettings", () => {
     expect(settings.uiScale).toBe(1);
     expect(settings.providerOrder).toEqual(PROVIDER_IDS);
     expect(settings.enabledProviders).toEqual(PROVIDER_IDS);
+    expect(settings.contrastMode).toBe("system");
+    expect(settings.automaticBackup).toBe(true);
+    expect(settings.backupRetentionDays).toBe(30);
+    expect(settings.trashRetentionDays).toBe(30);
+    expect(settings.trayEnabled).toBe(true);
+    expect(settings.closeBehavior).toBe("exit");
+    expect(settings.launchAtLogin).toBe(false);
+    expect(settings.notificationPreferences).toEqual({
+      generationCompleted: true,
+      generationFailed: true,
+      syncFailed: true,
+      showPreview: false,
+    });
+    expect(settings.updatePolicy).toBe("notify");
   });
 
   it("repairs provider order, enabled providers, and default provider", () => {
@@ -160,6 +174,89 @@ describe("appDataExportV1Schema", () => {
 
     expect(() => appDataExportV1Schema.parse(payload)).toThrow(
       "provider HTML must not contain local paths",
+    );
+  });
+
+  it("rejects duplicate IDs and messages whose parent metadata does not match", () => {
+    const duplicate = structuredClone(basePayload);
+    duplicate.conversations.push(structuredClone(duplicate.conversations[0]!));
+    expect(() => appDataExportV1Schema.parse(duplicate)).toThrow(
+      "Conversation IDs must be unique",
+    );
+
+    const wrongParent = structuredClone(basePayload);
+    wrongParent.conversations[0]!.messages[0]!.conversationId =
+      "another-conversation";
+    expect(() => appDataExportV1Schema.parse(wrongParent)).toThrow(
+      "must match its parent conversation",
+    );
+
+    const wrongProvider = structuredClone(basePayload);
+    wrongProvider.conversations[0]!.messages[0]!.provider = "claude";
+    expect(() => appDataExportV1Schema.parse(wrongProvider)).toThrow(
+      "must match its parent conversation",
+    );
+  });
+
+  it("rejects unsafe external IDs, missing relationships, and folder cycles", () => {
+    const unsafeExternal = structuredClone(basePayload);
+    unsafeExternal.conversations[0]!.externalId =
+      "file:///C:/Users/person/private.html";
+    expect(() => appDataExportV1Schema.parse(unsafeExternal)).toThrow(
+      "externalId must be an HTTPS URL",
+    );
+
+    const missingTag = structuredClone(basePayload);
+    missingTag.conversations[0]!.tagIds = ["missing-tag"];
+    expect(() => appDataExportV1Schema.parse(missingTag)).toThrow(
+      "must reference exported tags",
+    );
+
+    const cycle = structuredClone(basePayload);
+    cycle.folders = [
+      {
+        id: "folder-a",
+        name: "A",
+        parentId: "folder-b",
+        createdAt: timestamp,
+      },
+      {
+        id: "folder-b",
+        name: "B",
+        parentId: "folder-a",
+        createdAt: timestamp,
+      },
+    ];
+    expect(() => appDataExportV1Schema.parse(cycle)).toThrow(
+      "must not contain a cycle",
+    );
+  });
+
+  it("rejects multiple default prompts in the same provider scope", () => {
+    const duplicateDefaults = structuredClone(basePayload);
+    duplicateDefaults.systemPrompts = [
+      {
+        id: "prompt-a",
+        name: "A",
+        content: "A",
+        provider: "chatgpt",
+        isDefault: true,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      },
+      {
+        id: "prompt-b",
+        name: "B",
+        content: "B",
+        provider: "chatgpt",
+        isDefault: true,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      },
+    ];
+
+    expect(() => appDataExportV1Schema.parse(duplicateDefaults)).toThrow(
+      "Only one default system prompt is allowed per provider scope",
     );
   });
 });

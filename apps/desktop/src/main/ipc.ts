@@ -18,9 +18,22 @@ import {
   folderCreateSchema,
   folderRenameSchema,
   tagCreateSchema,
+  trashItemSchema,
+  trashRestoreSchema,
+  webConversationReimportSchema,
   appSettingsSchema,
+  backupCreateResultSchema,
+  backupIdSchema,
+  backupManifestV1Schema,
+  backupRestorePreviewSchema,
+  backupRestoreResultSchema,
   dataExportResultSchema,
+  dataImportPreviewSchema,
+  dataImportResultSchema,
+  dataImportTokenSchema,
   dataStorageSummarySchema,
+  dataResetRequestSchema,
+  dataResetResultSchema,
   settingsImportSchema,
   settingsImportPreviewSchema,
   externalUrlSchema,
@@ -42,11 +55,16 @@ import {
   currentWebConversationSyncResultSchema,
   webHistorySyncResultSchema,
   websiteConversationSnapshotSchema,
+  updateStateSchema,
 } from "@aihub/core";
 import { ipcMain } from "electron";
 import type { AppService } from "./app-service";
+import type { UpdateService } from "./update-service";
 
-export function registerIpc(service: AppService): void {
+export function registerIpc(
+  service: AppService,
+  updateService?: UpdateService,
+): void {
   for (const channel of [
     "app:get-snapshot",
     "conversation:create",
@@ -76,7 +94,24 @@ export function registerIpc(service: AppService): void {
     "settings:preview-import",
     "data:get-storage-summary",
     "data:export-all",
+    "data:preview-import",
+    "data:import",
     "data:open-folder",
+    "backup:list",
+    "backup:create",
+    "backup:delete",
+    "backup:preview-restore",
+    "backup:restore",
+    "trash:list",
+    "trash:restore",
+    "trash:purge",
+    "trash:empty",
+    "trash:allow-web-reimport",
+    "data:reset",
+    "update:get-state",
+    "update:check",
+    "update:download",
+    "update:install",
     "app:open-external",
     "conversation:search",
     "conversation:pin",
@@ -195,7 +230,69 @@ export function registerIpc(service: AppService): void {
   ipcMain.handle("data:export-all", async () =>
     dataExportResultSchema.parse(await service.exportAllData()),
   );
+  ipcMain.handle("data:preview-import", async () =>
+    dataImportPreviewSchema.parse(await service.previewDataImport()),
+  );
+  ipcMain.handle("data:import", async (_event, token) =>
+    dataImportResultSchema.parse(
+      await service.importAllData(dataImportTokenSchema.parse(token)),
+    ),
+  );
   ipcMain.handle("data:open-folder", () => service.openDataFolder());
+  ipcMain.handle("backup:list", async () =>
+    backupManifestV1Schema.array().parse(await service.listBackups()),
+  );
+  ipcMain.handle("backup:create", async () =>
+    backupCreateResultSchema.parse(await service.createBackup()),
+  );
+  ipcMain.handle("backup:delete", async (_event, backupId) =>
+    service.deleteBackup(backupIdSchema.parse(backupId)),
+  );
+  ipcMain.handle("backup:preview-restore", async (_event, backupId) =>
+    backupRestorePreviewSchema.parse(
+      await service.previewBackupRestore(backupIdSchema.parse(backupId)),
+    ),
+  );
+  ipcMain.handle("backup:restore", async (_event, backupId) =>
+    backupRestoreResultSchema.parse(
+      await service.restoreBackup(backupIdSchema.parse(backupId)),
+    ),
+  );
+  ipcMain.handle("trash:list", () =>
+    trashItemSchema.array().parse(service.listTrash()),
+  );
+  ipcMain.handle("trash:restore", (_event, input) => {
+    const { type, id } = trashRestoreSchema.parse(input);
+    return service.restoreTrash(type, id);
+  });
+  ipcMain.handle("trash:purge", (_event, input) => {
+    const { type, id } = trashRestoreSchema.parse(input);
+    return service.purgeTrash(type, id);
+  });
+  ipcMain.handle("trash:empty", () => service.emptyTrash());
+  ipcMain.handle("trash:allow-web-reimport", (_event, input) => {
+    const { provider, externalId } = webConversationReimportSchema.parse(input);
+    return service.allowWebConversationReimport(provider, externalId);
+  });
+  ipcMain.handle("data:reset", async (_event, input) =>
+    dataResetResultSchema.parse(
+      await service.resetData(dataResetRequestSchema.parse(input)),
+    ),
+  );
+  ipcMain.handle("update:get-state", () =>
+    updateStateSchema.parse(requireUpdateService(updateService).getState()),
+  );
+  ipcMain.handle("update:check", async () =>
+    updateStateSchema.parse(await requireUpdateService(updateService).check()),
+  );
+  ipcMain.handle("update:download", async () =>
+    updateStateSchema.parse(
+      await requireUpdateService(updateService).download(),
+    ),
+  );
+  ipcMain.handle("update:install", () =>
+    requireUpdateService(updateService).install(),
+  );
   ipcMain.handle("app:open-external", (_event, url) =>
     service.openExternal(externalUrlSchema.parse(url)),
   );
@@ -330,4 +427,11 @@ export function registerIpc(service: AppService): void {
     const outPath = join(process.cwd(), "debug-dump.txt");
     writeFileSync(outPath, data, "utf-8");
   });
+}
+
+function requireUpdateService(
+  updateService: UpdateService | undefined,
+): UpdateService {
+  if (!updateService) throw new Error("Update service is not available.");
+  return updateService;
 }

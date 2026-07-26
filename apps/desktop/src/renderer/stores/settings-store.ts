@@ -3,15 +3,19 @@ import {
   DEFAULT_APP_SETTINGS,
   normalizeAppSettings,
   type AppSettingsPayload,
+  type CloseBehavior,
+  type ContrastMode,
   type ContentWidth,
   type InterfaceDensity,
   type LocaleMode,
   type MotionPreference,
+  type NotificationPreferences,
   type NormalizedAppSettings,
   type ProviderApiConfig,
   type ProviderBackendMode,
   type ProviderId,
   type UiScale,
+  type UpdatePolicy,
 } from "@aihub/core";
 import { normalizeProviderDrawerWidth } from "../utils/layout";
 import { normalizeShortcutBinding } from "../utils/shortcuts";
@@ -68,6 +72,18 @@ interface SettingsState extends NormalizedAppSettings {
   setContentWidth: (width: ContentWidth) => void;
   setCodeWrap: (enabled: boolean) => void;
   setMotion: (motion: MotionPreference) => void;
+  setContrastMode: (mode: ContrastMode) => void;
+  setAutomaticBackup: (enabled: boolean) => void;
+  setBackupRetentionDays: (days: 7 | 30 | 90 | 365) => void;
+  setTrashRetentionDays: (days: 0 | 7 | 30 | 90) => void;
+  setTrayEnabled: (enabled: boolean) => void;
+  setCloseBehavior: (behavior: CloseBehavior) => void;
+  setLaunchAtLogin: (enabled: boolean) => void;
+  setNotificationPreference: (
+    key: keyof NotificationPreferences,
+    enabled: boolean,
+  ) => void;
+  setUpdatePolicy: (policy: UpdatePolicy) => void;
   resetAppearance: () => void;
   setSidebarWidth: (width: number) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
@@ -190,6 +206,27 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     setContentWidth: (contentWidth) => commit({ contentWidth }),
     setCodeWrap: (codeWrap) => commit({ codeWrap }),
     setMotion: (motion) => commit({ motion }),
+    setContrastMode: (contrastMode) => commit({ contrastMode }),
+    setAutomaticBackup: (automaticBackup) => commit({ automaticBackup }),
+    setBackupRetentionDays: (backupRetentionDays) =>
+      commit({ backupRetentionDays }),
+    setTrashRetentionDays: (trashRetentionDays) =>
+      commit({ trashRetentionDays }),
+    setTrayEnabled: (trayEnabled) =>
+      commit({
+        trayEnabled,
+        ...(trayEnabled ? {} : { closeBehavior: "exit" }),
+      }),
+    setCloseBehavior: (closeBehavior) => commit({ closeBehavior }),
+    setLaunchAtLogin: (launchAtLogin) => commit({ launchAtLogin }),
+    setNotificationPreference: (key, enabled) =>
+      commit({
+        notificationPreferences: {
+          ...get().notificationPreferences,
+          [key]: enabled,
+        },
+      }),
+    setUpdatePolicy: (updatePolicy) => commit({ updatePolicy }),
     resetAppearance: () =>
       commit({
         theme: DEFAULT_APP_SETTINGS.theme,
@@ -198,6 +235,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
         contentWidth: DEFAULT_APP_SETTINGS.contentWidth,
         codeWrap: DEFAULT_APP_SETTINGS.codeWrap,
         motion: DEFAULT_APP_SETTINGS.motion,
+        contrastMode: DEFAULT_APP_SETTINGS.contrastMode,
       }),
     setSidebarWidth: (sidebarWidth) => commit({ sidebarWidth }),
     setSidebarCollapsed: (sidebarCollapsed) => commit({ sidebarCollapsed }),
@@ -302,6 +340,7 @@ export function applyAppearance(settings: AppSettingsPayload): void {
   root.dataset.contentWidth = settings.contentWidth ?? "standard";
   root.dataset.codeWrap = settings.codeWrap ? "true" : "false";
   root.dataset.motion = settings.motion ?? "system";
+  root.dataset.contrast = settings.contrastMode ?? "system";
 }
 
 export function settingsPayload(state: SettingsState): AppSettingsPayload {
@@ -319,6 +358,15 @@ export function settingsPayload(state: SettingsState): AppSettingsPayload {
     contentWidth: state.contentWidth,
     codeWrap: state.codeWrap,
     motion: state.motion,
+    contrastMode: state.contrastMode,
+    automaticBackup: state.automaticBackup,
+    backupRetentionDays: state.backupRetentionDays,
+    trashRetentionDays: state.trashRetentionDays,
+    trayEnabled: state.trayEnabled,
+    closeBehavior: state.closeBehavior,
+    launchAtLogin: state.launchAtLogin,
+    notificationPreferences: state.notificationPreferences,
+    updatePolicy: state.updatePolicy,
     sidebarWidth: state.sidebarWidth,
     sidebarCollapsed: state.sidebarCollapsed,
     providerDrawerWidth: state.providerDrawerWidth,

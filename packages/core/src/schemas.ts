@@ -638,6 +638,30 @@ export const appSettingsSchema = z.object({
   contentWidth: z.enum(["narrow", "standard", "wide"]).optional(),
   codeWrap: z.boolean().optional(),
   motion: z.enum(["system", "reduced", "full"]).optional(),
+  contrastMode: z.enum(["system", "standard", "high"]).optional(),
+  automaticBackup: z.boolean().optional(),
+  backupRetentionDays: z.union([
+    z.literal(7),
+    z.literal(30),
+    z.literal(90),
+    z.literal(365),
+  ]).optional(),
+  trashRetentionDays: z.union([
+    z.literal(0),
+    z.literal(7),
+    z.literal(30),
+    z.literal(90),
+  ]).optional(),
+  trayEnabled: z.boolean().optional(),
+  closeBehavior: z.enum(["exit", "minimize-to-tray"]).optional(),
+  launchAtLogin: z.boolean().optional(),
+  notificationPreferences: z.object({
+    generationCompleted: z.boolean(),
+    generationFailed: z.boolean(),
+    syncFailed: z.boolean(),
+    showPreview: z.boolean(),
+  }).optional(),
+  updatePolicy: z.enum(["manual", "notify", "auto-download"]).optional(),
   sidebarWidth: z.number().min(200).max(480).optional(),
   sidebarCollapsed: z.boolean().optional(),
   providerDrawerWidth: z.number().min(320).max(1_200).optional(),
@@ -727,6 +751,136 @@ export const dataExportResultSchema = z.object({
   messageCount: z.number().int().nonnegative().optional(),
 });
 
+export const dataImportPreviewSchema = z.object({
+  canceled: z.boolean(),
+  token: z.string().uuid().optional(),
+  fileName: z.string().min(1).optional(),
+  conversationCount: z.number().int().nonnegative().optional(),
+  messageCount: z.number().int().nonnegative().optional(),
+  folderCount: z.number().int().nonnegative().optional(),
+  tagCount: z.number().int().nonnegative().optional(),
+  systemPromptCount: z.number().int().nonnegative().optional(),
+  conflictCount: z.number().int().nonnegative().optional(),
+  ignoredKnowledgeDocumentCount: z.number().int().nonnegative().optional(),
+  adjustedDefaultPromptCount: z.number().int().nonnegative().optional(),
+  warnings: z.array(z.string()).optional(),
+});
+
+export const dataImportTokenSchema = z.string().uuid();
+
+export const dataImportResultSchema = z.object({
+  conversationCount: z.number().int().nonnegative(),
+  messageCount: z.number().int().nonnegative(),
+  folderCount: z.number().int().nonnegative(),
+  tagCount: z.number().int().nonnegative(),
+  systemPromptCount: z.number().int().nonnegative(),
+  skippedConflictCount: z.number().int().nonnegative(),
+  ignoredKnowledgeDocumentCount: z.number().int().nonnegative(),
+  adjustedDefaultPromptCount: z.number().int().nonnegative(),
+});
+
+export const backupReasonSchema = z.enum([
+  "manual",
+  "scheduled",
+  "pre-restore",
+  "pre-reset",
+  "pre-update",
+]);
+
+export const backupManifestV1Schema = z.object({
+  format: z.literal("aihub-backup"),
+  version: z.literal(1),
+  id: z.string().uuid(),
+  appVersion: z.string().min(1),
+  databaseSchemaVersion: z.number().int().nonnegative(),
+  createdAt: z.string().datetime(),
+  reason: backupReasonSchema,
+  databaseFile: z.string().regex(/^[a-f0-9-]+\.sqlite$/),
+  databaseBytes: z.number().int().nonnegative(),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  conversationCount: z.number().int().nonnegative(),
+  messageCount: z.number().int().nonnegative(),
+  documentCount: z.number().int().nonnegative(),
+});
+
+export const backupCreateResultSchema = z.object({
+  backup: backupManifestV1Schema,
+  prunedIds: z.array(z.string().uuid()),
+});
+
+export const backupIdSchema = z.string().uuid();
+
+export const backupRestorePreviewSchema = z.object({
+  backup: backupManifestV1Schema,
+  current: z.object({
+    conversationCount: z.number().int().nonnegative(),
+    messageCount: z.number().int().nonnegative(),
+    documentCount: z.number().int().nonnegative(),
+  }),
+  warnings: z.array(z.string()),
+  requiresRestart: z.literal(true),
+});
+
+export const backupRestoreResultSchema = z.object({
+  scheduled: z.boolean(),
+  backupId: backupIdSchema,
+});
+
+export const trashEntityTypeSchema = z.enum([
+  "conversation",
+  "folder",
+  "tag",
+  "system-prompt",
+  "document",
+]);
+
+export const trashItemSchema = z.object({
+  type: trashEntityTypeSchema,
+  id: z.string().min(1),
+  label: z.string().min(1),
+  deletedAt: z.string().datetime(),
+  purgeAt: z.string().datetime().optional(),
+  provider: providerIdSchema.optional(),
+});
+
+export const trashRestoreSchema = z.object({
+  type: trashEntityTypeSchema,
+  id: z.string().min(1),
+});
+
+export const webConversationReimportSchema = z.object({
+  provider: providerIdSchema,
+  externalId: z.string().min(1).max(4_000),
+});
+
+export const dataResetRequestSchema = z.object({
+  scope: z.enum(["local-content", "provider-sessions", "everything"]),
+  confirmation: z.literal("AIHub"),
+  createBackup: z.boolean(),
+});
+
+export const dataResetResultSchema = z.object({
+  scheduledRestart: z.boolean(),
+  backupId: z.string().uuid().optional(),
+});
+
+export const updateStateSchema = z.object({
+  status: z.enum([
+    "idle",
+    "checking",
+    "available",
+    "downloading",
+    "downloaded",
+    "not-available",
+    "error",
+  ]),
+  currentVersion: z.string().min(1),
+  availableVersion: z.string().min(1).optional(),
+  percent: z.number().min(0).max(100).optional(),
+  releaseName: z.string().optional(),
+  error: z.string().optional(),
+});
+
 export const appDataExportV1Schema = z.object({
   format: z.literal("aihub-data"),
   version: z.literal(1),
@@ -734,8 +888,50 @@ export const appDataExportV1Schema = z.object({
   exportedAt: z.string().datetime(),
   conversations: z.array(normalizedConversationSchema).superRefine(
     (conversations, context) => {
+      const conversationIds = new Set<string>();
+      const messageIds = new Set<string>();
       conversations.forEach((conversation, conversationIndex) => {
+        if (conversationIds.has(conversation.id)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Conversation IDs must be unique.",
+            path: [conversationIndex, "id"],
+          });
+        }
+        conversationIds.add(conversation.id);
         conversation.messages.forEach((message, messageIndex) => {
+          if (messageIds.has(message.id)) {
+            context.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Message IDs must be unique.",
+              path: [conversationIndex, "messages", messageIndex, "id"],
+            });
+          }
+          messageIds.add(message.id);
+          if (message.conversationId !== conversation.id) {
+            context.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Message conversationId must match its parent conversation.",
+              path: [
+                conversationIndex,
+                "messages",
+                messageIndex,
+                "conversationId",
+              ],
+            });
+          }
+          if (message.provider !== conversation.provider) {
+            context.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Message provider must match its parent conversation.",
+              path: [
+                conversationIndex,
+                "messages",
+                messageIndex,
+                "provider",
+              ],
+            });
+          }
           if (
             message.providerHtml &&
             /(?:^|[\s"'(=])(?:file:|[a-z]:[\\/]|\\\\)/i.test(
@@ -841,7 +1037,179 @@ export const appDataExportV1Schema = z.object({
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
   })),
+}).superRefine((payload, context) => {
+  const folderIds = uniqueIds(
+    payload.folders,
+    "Folder IDs must be unique.",
+    ["folders"],
+    context,
+  );
+  const tagIds = uniqueIds(
+    payload.tags,
+    "Tag IDs must be unique.",
+    ["tags"],
+    context,
+  );
+  const promptIds = uniqueIds(
+    payload.systemPrompts,
+    "System prompt IDs must be unique.",
+    ["systemPrompts"],
+    context,
+  );
+  const documentIds = uniqueIds(
+    payload.documents,
+    "Knowledge document IDs must be unique.",
+    ["documents"],
+    context,
+  );
+  const tagNames = new Set<string>();
+  const defaultPromptScopes = new Set<string>();
+  payload.tags.forEach((tag, index) => {
+    if (tagNames.has(tag.name)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Tag names must be unique.",
+        path: ["tags", index, "name"],
+      });
+    }
+    tagNames.add(tag.name);
+  });
+  payload.systemPrompts.forEach((prompt, index) => {
+    if (!prompt.isDefault) return;
+    const scope = prompt.provider ?? "global";
+    if (defaultPromptScopes.has(scope)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Only one default system prompt is allowed per provider scope.",
+        path: ["systemPrompts", index, "isDefault"],
+      });
+    }
+    defaultPromptScopes.add(scope);
+  });
+  const folderParents = new Map(
+    payload.folders.map((folder) => [folder.id, folder.parentId]),
+  );
+  const externalConversationIds = new Set<string>();
+  payload.folders.forEach((folder, index) => {
+    if (folder.parentId && !folderIds.has(folder.parentId)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Folder parentId must reference an exported folder.",
+        path: ["folders", index, "parentId"],
+      });
+      return;
+    }
+    const visited = new Set<string>([folder.id]);
+    let parentId = folder.parentId;
+    while (parentId) {
+      if (visited.has(parentId)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Folder hierarchy must not contain a cycle.",
+          path: ["folders", index, "parentId"],
+        });
+        break;
+      }
+      visited.add(parentId);
+      parentId = folderParents.get(parentId);
+    }
+  });
+  payload.conversations.forEach((conversation, index) => {
+    if (conversation.externalId) {
+      try {
+        if (new URL(conversation.externalId).protocol !== "https:") {
+          throw new Error("Unsupported protocol");
+        }
+        const externalKey =
+          `${conversation.provider}:${conversation.externalId}`;
+        if (externalConversationIds.has(externalKey)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message:
+              "Conversation externalId must be unique within its provider.",
+            path: ["conversations", index, "externalId"],
+          });
+        }
+        externalConversationIds.add(externalKey);
+      } catch {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Conversation externalId must be an HTTPS URL.",
+          path: ["conversations", index, "externalId"],
+        });
+      }
+    }
+    addMissingReferenceIssue(
+      conversation.folderId,
+      folderIds,
+      "Conversation folderId must reference an exported folder.",
+      ["conversations", index, "folderId"],
+      context,
+    );
+    addMissingReferenceIssue(
+      conversation.systemPromptId,
+      promptIds,
+      "Conversation systemPromptId must reference an exported prompt.",
+      ["conversations", index, "systemPromptId"],
+      context,
+    );
+    conversation.tagIds.forEach((tagId, tagIndex) =>
+      addMissingReferenceIssue(
+        tagId,
+        tagIds,
+        "Conversation tagIds must reference exported tags.",
+        ["conversations", index, "tagIds", tagIndex],
+        context,
+      ),
+    );
+    conversation.documentIds.forEach((documentId, documentIndex) =>
+      addMissingReferenceIssue(
+        documentId,
+        documentIds,
+        "Conversation documentIds must reference exported knowledge metadata.",
+        ["conversations", index, "documentIds", documentIndex],
+        context,
+      ),
+    );
+  });
 });
+
+function uniqueIds(
+  values: Array<{ id: string }>,
+  message: string,
+  path: string[],
+  context: z.RefinementCtx,
+): Set<string> {
+  const ids = new Set<string>();
+  values.forEach((value, index) => {
+    if (ids.has(value.id)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message,
+        path: [...path, index, "id"],
+      });
+    }
+    ids.add(value.id);
+  });
+  return ids;
+}
+
+function addMissingReferenceIssue(
+  id: string | undefined,
+  knownIds: Set<string>,
+  message: string,
+  path: Array<string | number>,
+  context: z.RefinementCtx,
+): void {
+  if (id && !knownIds.has(id)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message,
+      path,
+    });
+  }
+}
 
 export const externalUrlSchema = z
   .string()

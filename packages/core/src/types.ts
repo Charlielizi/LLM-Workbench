@@ -171,6 +171,16 @@ export type InterfaceDensity = "comfortable" | "compact";
 export type ContentWidth = "narrow" | "standard" | "wide";
 export type MotionPreference = "system" | "reduced" | "full";
 export type UiScale = 0.9 | 1 | 1.1 | 1.25;
+export type CloseBehavior = "exit" | "minimize-to-tray";
+export type ContrastMode = "system" | "standard" | "high";
+export type UpdatePolicy = "manual" | "notify" | "auto-download";
+
+export interface NotificationPreferences {
+  generationCompleted: boolean;
+  generationFailed: boolean;
+  syncFailed: boolean;
+  showPreview: boolean;
+}
 
 export interface AppSettingsPayload {
   theme?: "dark" | "light" | "system";
@@ -186,6 +196,15 @@ export interface AppSettingsPayload {
   contentWidth?: ContentWidth;
   codeWrap?: boolean;
   motion?: MotionPreference;
+  contrastMode?: ContrastMode;
+  automaticBackup?: boolean;
+  backupRetentionDays?: 7 | 30 | 90 | 365;
+  trashRetentionDays?: 7 | 30 | 90 | 0;
+  trayEnabled?: boolean;
+  closeBehavior?: CloseBehavior;
+  launchAtLogin?: boolean;
+  notificationPreferences?: NotificationPreferences;
+  updatePolicy?: UpdatePolicy;
   sidebarWidth?: number;
   sidebarCollapsed?: boolean;
   providerDrawerWidth?: number;
@@ -240,6 +259,121 @@ export interface DataExportResult {
   path?: string;
   conversationCount?: number;
   messageCount?: number;
+}
+
+export interface DataImportPreview {
+  canceled: boolean;
+  token?: string;
+  fileName?: string;
+  conversationCount?: number;
+  messageCount?: number;
+  folderCount?: number;
+  tagCount?: number;
+  systemPromptCount?: number;
+  conflictCount?: number;
+  ignoredKnowledgeDocumentCount?: number;
+  adjustedDefaultPromptCount?: number;
+  warnings?: string[];
+}
+
+export interface DataImportResult {
+  conversationCount: number;
+  messageCount: number;
+  folderCount: number;
+  tagCount: number;
+  systemPromptCount: number;
+  skippedConflictCount: number;
+  ignoredKnowledgeDocumentCount: number;
+  adjustedDefaultPromptCount: number;
+}
+
+export type BackupReason =
+  | "manual"
+  | "scheduled"
+  | "pre-restore"
+  | "pre-reset"
+  | "pre-update";
+
+export interface BackupManifestV1 {
+  format: "aihub-backup";
+  version: 1;
+  id: string;
+  appVersion: string;
+  databaseSchemaVersion: number;
+  createdAt: string;
+  reason: BackupReason;
+  databaseFile: string;
+  databaseBytes: number;
+  sha256: string;
+  conversationCount: number;
+  messageCount: number;
+  documentCount: number;
+}
+
+export interface BackupCreateResult {
+  backup: BackupManifestV1;
+  prunedIds: string[];
+}
+
+export interface BackupRestorePreview {
+  backup: BackupManifestV1;
+  current: {
+    conversationCount: number;
+    messageCount: number;
+    documentCount: number;
+  };
+  warnings: string[];
+  requiresRestart: true;
+}
+
+export interface BackupRestoreResult {
+  scheduled: boolean;
+  backupId: string;
+}
+
+export type TrashEntityType =
+  | "conversation"
+  | "folder"
+  | "tag"
+  | "system-prompt"
+  | "document";
+
+export interface TrashItem {
+  type: TrashEntityType;
+  id: string;
+  label: string;
+  deletedAt: string;
+  purgeAt?: string;
+  provider?: ProviderId;
+}
+
+export interface DataResetRequest {
+  scope: "local-content" | "provider-sessions" | "everything";
+  confirmation: "AIHub";
+  createBackup: boolean;
+}
+
+export interface DataResetResult {
+  scheduledRestart: boolean;
+  backupId?: string;
+}
+
+export type UpdateStateStatus =
+  | "idle"
+  | "checking"
+  | "available"
+  | "downloading"
+  | "downloaded"
+  | "not-available"
+  | "error";
+
+export interface UpdateState {
+  status: UpdateStateStatus;
+  currentVersion: string;
+  availableVersion?: string;
+  percent?: number;
+  releaseName?: string;
+  error?: string;
 }
 
 export interface ConversationRef {

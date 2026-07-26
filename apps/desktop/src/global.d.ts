@@ -1,8 +1,16 @@
 import type {
   AppSnapshot,
   AppSettingsPayload,
+  BackupCreateResult,
+  BackupManifestV1,
+  BackupRestorePreview,
+  BackupRestoreResult,
   DataExportResult,
+  DataImportPreview,
+  DataImportResult,
   DataStorageSummary,
+  DataResetRequest,
+  DataResetResult,
   AdapterEventRecord,
   ComparisonSession,
   KnowledgeDocument,
@@ -20,6 +28,9 @@ import type {
   SystemPrompt,
   SettingsImportPreview,
   TransferPreview,
+  TrashEntityType,
+  TrashItem,
+  UpdateState,
   WebHistorySyncResult,
   WebsiteConversationSnapshot,
 } from "@aihub/core";
@@ -86,7 +97,27 @@ export interface AIHubApi {
   previewSettingsImport(json: string): Promise<SettingsImportPreview>;
   getStorageSummary(): Promise<DataStorageSummary>;
   exportAllData(): Promise<DataExportResult>;
+  previewDataImport(): Promise<DataImportPreview>;
+  importAllData(token: string): Promise<DataImportResult>;
   openDataFolder(): Promise<void>;
+  listBackups(): Promise<BackupManifestV1[]>;
+  createBackup(): Promise<BackupCreateResult>;
+  deleteBackup(backupId: string): Promise<void>;
+  previewBackupRestore(backupId: string): Promise<BackupRestorePreview>;
+  restoreBackup(backupId: string): Promise<BackupRestoreResult>;
+  listTrash(): Promise<TrashItem[]>;
+  restoreTrash(type: TrashEntityType, id: string): Promise<void>;
+  purgeTrash(type: TrashEntityType, id: string): Promise<void>;
+  emptyTrash(): Promise<void>;
+  allowWebConversationReimport(
+    provider: ProviderId,
+    externalId: string,
+  ): Promise<void>;
+  resetData(request: DataResetRequest): Promise<DataResetResult>;
+  getUpdateState(): Promise<UpdateState>;
+  checkForUpdates(): Promise<UpdateState>;
+  downloadUpdate(): Promise<UpdateState>;
+  installUpdate(): Promise<void>;
   openExternal(url: string): Promise<void>;
   searchConversations(query: string): Promise<NormalizedConversation[]>;
   pinConversation(conversationId: string, pinned: boolean): Promise<void>;
@@ -166,6 +197,8 @@ export interface AIHubApi {
   onProviderEvent(
     listener: (provider: ProviderId, event: ProviderEvent) => void,
   ): () => void;
+  onOpenConversation(listener: (conversationId: string) => void): () => void;
+  onUpdateState(listener: (state: UpdateState) => void): () => void;
 }
 
 declare global {

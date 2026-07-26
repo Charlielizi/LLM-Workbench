@@ -220,7 +220,7 @@ export function Sidebar() {
       conversationIds: selectedConversationIds,
     });
     if (deleted) {
-      useToastStore.getState().addToast(t("toast.deleted"), "success");
+      useToastStore.getState().addToast(t("toast.movedToTrash"), "success");
       finishBulkMode();
     }
   }

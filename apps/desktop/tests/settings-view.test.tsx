@@ -9,6 +9,7 @@ import {
   DEFAULT_SHORTCUTS,
   useSettingsStore,
 } from "../src/renderer/stores/settings-store";
+import { useToastStore } from "../src/renderer/stores/toast-store";
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean | undefined;
@@ -67,6 +68,7 @@ describe("SettingsView", () => {
       tags: [],
       systemPrompts: [],
     });
+    useToastStore.setState({ toasts: [] });
     window.aihub = {
       setProviderWebsiteVisible: vi.fn().mockResolvedValue(undefined),
       getStorageSummary: vi.fn().mockResolvedValue({
@@ -78,6 +80,37 @@ describe("SettingsView", () => {
         documentBytes: 0,
         indexedCharacterCount: 0,
       }),
+      listBackups: vi.fn().mockResolvedValue([]),
+      listTrash: vi.fn().mockResolvedValue([]),
+      previewDataImport: vi.fn().mockResolvedValue({
+        canceled: false,
+        token: "4d657e5e-c10b-4bc0-932f-6f3f3433485f",
+        fileName: "aihub-data.json",
+        conversationCount: 2,
+        messageCount: 8,
+        folderCount: 1,
+        tagCount: 1,
+        systemPromptCount: 1,
+        conflictCount: 3,
+        ignoredKnowledgeDocumentCount: 2,
+        adjustedDefaultPromptCount: 1,
+        warnings: ["Existing records will not be overwritten."],
+      }),
+      importAllData: vi.fn().mockResolvedValue({
+        conversationCount: 2,
+        messageCount: 8,
+        folderCount: 1,
+        tagCount: 1,
+        systemPromptCount: 1,
+        skippedConflictCount: 3,
+        ignoredKnowledgeDocumentCount: 2,
+        adjustedDefaultPromptCount: 1,
+      }),
+      getUpdateState: vi.fn().mockResolvedValue({
+        status: "idle",
+        currentVersion: "0.2.0",
+      }),
+      onUpdateState: vi.fn().mockReturnValue(() => undefined),
       previewSettingsImport: vi.fn().mockResolvedValue({
         candidate: { theme: "dark" },
         changes: [{ key: "theme", before: "light", after: "dark" }],
@@ -191,6 +224,54 @@ describe("SettingsView", () => {
     });
     expect(recorder!.textContent).toContain("Ctrl+K");
     expect(useSettingsStore.getState().shortcuts.focusSearch).toBe("Ctrl+K");
+  });
+
+  it("previews and confirms a portable data import before applying it", async () => {
+    await act(async () => root.render(<SettingsView />));
+    await clickButton("Data & privacy");
+    await act(async () => Promise.resolve());
+
+    await clickButton("Import all conversations");
+    await vi.waitFor(() =>
+      expect(container.textContent).toContain("aihub-data.json"),
+    );
+    expect(container.textContent).toContain("Conflicts (will be skipped)");
+    expect(container.textContent).toContain(
+      "Knowledge metadata (will be skipped)",
+    );
+    expect(container.textContent).toContain(
+      "Existing records will not be overwritten.",
+    );
+
+    const dialog = container.querySelector('[role="dialog"]');
+    const confirm = [...(dialog?.querySelectorAll("button") ?? [])].find(
+      (button) => button.textContent === "Confirm",
+    );
+    expect(confirm).toBeDefined();
+    await act(async () => confirm!.click());
+    await vi.waitFor(() =>
+      expect(window.aihub.importAllData).toHaveBeenCalledWith(
+        "4d657e5e-c10b-4bc0-932f-6f3f3433485f",
+      ),
+    );
+  });
+
+  it("surfaces an immediate settings persistence failure as localized UI and a toast", async () => {
+    await act(async () => root.render(<SettingsView />));
+
+    await act(async () => {
+      useSettingsStore.setState({ syncError: "disk is read-only" });
+    });
+
+    await vi.waitFor(() =>
+      expect(container.textContent).toContain(
+        "Settings could not be saved and were restored from SQLite",
+      ),
+    );
+    expect(useToastStore.getState().toasts.at(-1)).toMatchObject({
+      type: "error",
+      message: expect.stringContaining("disk is read-only"),
+    });
   });
 
   it("restores the previous workspace and provider drawer after settings", () => {

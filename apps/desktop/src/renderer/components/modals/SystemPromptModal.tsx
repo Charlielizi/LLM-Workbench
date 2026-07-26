@@ -65,7 +65,7 @@ export function SystemPromptModal() {
     if (!confirmed) return;
     if (await deleteSystemPrompt(draft.id)) {
       setDraft(emptyDraft);
-      useToastStore.getState().addToast(t("toast.deleted"), "success");
+      useToastStore.getState().addToast(t("toast.movedToTrash"), "success");
     }
   }
 

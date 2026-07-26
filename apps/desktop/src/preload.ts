@@ -57,7 +57,29 @@ const api: AIHubApi = {
     ipcRenderer.invoke("settings:preview-import", { json }),
   getStorageSummary: () => ipcRenderer.invoke("data:get-storage-summary"),
   exportAllData: () => ipcRenderer.invoke("data:export-all"),
+  previewDataImport: () => ipcRenderer.invoke("data:preview-import"),
+  importAllData: (token) => ipcRenderer.invoke("data:import", token),
   openDataFolder: () => ipcRenderer.invoke("data:open-folder"),
+  listBackups: () => ipcRenderer.invoke("backup:list"),
+  createBackup: () => ipcRenderer.invoke("backup:create"),
+  deleteBackup: (backupId) => ipcRenderer.invoke("backup:delete", backupId),
+  previewBackupRestore: (backupId) =>
+    ipcRenderer.invoke("backup:preview-restore", backupId),
+  restoreBackup: (backupId) =>
+    ipcRenderer.invoke("backup:restore", backupId),
+  listTrash: () => ipcRenderer.invoke("trash:list"),
+  restoreTrash: (type, id) =>
+    ipcRenderer.invoke("trash:restore", { type, id }),
+  purgeTrash: (type, id) =>
+    ipcRenderer.invoke("trash:purge", { type, id }),
+  emptyTrash: () => ipcRenderer.invoke("trash:empty"),
+  allowWebConversationReimport: (provider, externalId) =>
+    ipcRenderer.invoke("trash:allow-web-reimport", { provider, externalId }),
+  resetData: (request) => ipcRenderer.invoke("data:reset", request),
+  getUpdateState: () => ipcRenderer.invoke("update:get-state"),
+  checkForUpdates: () => ipcRenderer.invoke("update:check"),
+  downloadUpdate: () => ipcRenderer.invoke("update:download"),
+  installUpdate: () => ipcRenderer.invoke("update:install"),
   openExternal: (url) => ipcRenderer.invoke("app:open-external", url),
   searchConversations: (query) =>
     ipcRenderer.invoke("conversation:search", { query }),
@@ -134,6 +156,22 @@ const api: AIHubApi = {
     ) => listener(...args);
     ipcRenderer.on("app:provider-event", handler);
     return () => ipcRenderer.removeListener("app:provider-event", handler);
+  },
+  onOpenConversation: (listener) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      conversationId: string,
+    ) => listener(conversationId);
+    ipcRenderer.on("app:open-conversation", handler);
+    return () => ipcRenderer.removeListener("app:open-conversation", handler);
+  },
+  onUpdateState: (listener) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      state: Parameters<typeof listener>[0],
+    ) => listener(state);
+    ipcRenderer.on("app:update-state", handler);
+    return () => ipcRenderer.removeListener("app:update-state", handler);
   },
 };
 

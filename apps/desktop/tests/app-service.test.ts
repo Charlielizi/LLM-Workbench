@@ -2100,8 +2100,9 @@ describe("AppService", () => {
           kind: "provider-assistant",
         },
       ],
-      providerHtml: '<img src="file:///C:/Users/person/provider.png">',
-      status: "completed",
+      providerHtml:
+        '<div data-provider-session="private">Provider-only markup</div>',
+      status: "streaming",
       provider: "chatgpt",
       createdAt: new Date().toISOString(),
     });
@@ -2122,6 +2123,14 @@ describe("AppService", () => {
     expect(exported).not.toContain("localPath");
     expect(exported).not.toContain("C:\\\\Users");
     expect(exported).not.toContain("file:///");
+    expect(exported).not.toContain("data-provider-session");
+    expect(exported).not.toContain("Provider-only markup");
+    expect(JSON.parse(exported).conversations[0].messages[0]).toMatchObject({
+      status: "failed",
+      statusPhase: "failed",
+      errorCode: "exported_incomplete_message",
+      failureOrigin: "client",
+    });
   });
 
   it("does not write data when the export dialog is canceled", async () => {
@@ -2190,6 +2199,95 @@ describe("AppService", () => {
 
     await expect(service.exportAllData()).rejects.toThrow();
     await expect(readFile(destination, "utf8")).rejects.toThrow();
+  });
+
+  it("requires a fresh preview when a portable import file changes", async () => {
+    tempUserDataDir = await mkdtemp(
+      path.join(os.tmpdir(), "aihub-app-service-import-"),
+    );
+    const source = path.join(tempUserDataDir, "aihub-data.json");
+    const timestamp = "2026-07-26T00:00:00.000Z";
+    const payload = {
+      format: "aihub-data",
+      version: 1,
+      appVersion: "0.1.0",
+      exportedAt: timestamp,
+      conversations: [],
+      folders: [],
+      tags: [],
+      systemPrompts: [],
+      documents: [],
+    };
+    await writeFile(source, JSON.stringify(payload), "utf8");
+    const { dialog } = await import("electron");
+    vi.mocked(dialog.showOpenDialog).mockResolvedValueOnce({
+      canceled: false,
+      filePaths: [source],
+    });
+    const service = new AppServiceClass(
+      windowStub(),
+      database,
+      tempUserDataDir,
+    );
+
+    const preview = await service.previewDataImport();
+    expect(preview).toMatchObject({
+      canceled: false,
+      fileName: "aihub-data.json",
+      conversationCount: 0,
+    });
+    await writeFile(
+      source,
+      JSON.stringify({ ...payload, appVersion: "changed" }),
+      "utf8",
+    );
+
+    await expect(service.importAllData(preview.token!)).rejects.toThrow(
+      /changed after preview/i,
+    );
+    await expect(service.importAllData(preview.token!)).rejects.toThrow(
+      /preview expired/i,
+    );
+  });
+
+  it("creates a pre-reset backup and only then clears local content", async () => {
+    tempUserDataDir = await mkdtemp(
+      path.join(os.tmpdir(), "aihub-app-service-reset-"),
+    );
+    const requestRestart = vi.fn();
+    database.createConversation({
+      id: "reset-conversation",
+      title: "Back me up",
+      provider: "chatgpt",
+    });
+    const service = new AppServiceClass(
+      windowStub(),
+      database,
+      tempUserDataDir,
+      { requestRestart },
+    );
+
+    const result = await service.resetData({
+      scope: "local-content",
+      confirmation: "AIHub",
+      createBackup: true,
+    });
+
+    expect(result).toMatchObject({
+      scheduledRestart: true,
+      backupId: expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      ),
+    });
+    expect(database.listConversations(true)).toEqual([]);
+    await expect(service.listBackups()).resolves.toMatchObject([
+      {
+        id: result.backupId,
+        reason: "pre-reset",
+        conversationCount: 1,
+      },
+    ]);
+    await vi.waitFor(() => expect(requestRestart).toHaveBeenCalledOnce());
   });
 
   it("clears only the requested provider site partition", async () => {

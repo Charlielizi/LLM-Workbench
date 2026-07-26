@@ -11,6 +11,7 @@ import {
   appSettingsSchema,
   buildCompressionPrompt,
   buildTransferDraft,
+  DEFAULT_APP_SETTINGS,
   normalizeAppSettings,
   normalizedConversationSchema,
   providerSmokeRuntimeInfoSchema,
@@ -22,6 +23,10 @@ import {
   type AppSnapshot,
   type AppDataExportV1,
   type AppSettingsPayload,
+  type BackupCreateResult,
+  type BackupManifestV1,
+  type BackupRestorePreview,
+  type BackupRestoreResult,
   type AdapterEventRecord,
   type ComparisonSession,
   type ContentBlock,
@@ -29,8 +34,12 @@ import {
   type ConversationTag,
   type CurrentWebConversationSyncResult,
   type KnowledgeDocument,
+  type DataImportPreview,
+  type DataImportResult,
   type DataExportResult,
   type DataStorageSummary,
+  type DataResetRequest,
+  type DataResetResult,
   type NormalizedConversation,
   type NormalizedMessage,
   type ProviderEvent,
@@ -46,6 +55,8 @@ import {
   type ProviderSmokeTestResult,
   type SystemPrompt,
   type SettingsImportPreview,
+  type TrashEntityType,
+  type TrashItem,
   type TransferPreview,
   type WebHistorySyncResult,
   type WebsiteConversationRef,
@@ -63,6 +74,15 @@ import {
   type ProviderClient,
 } from "./provider-client";
 import { MockProviderClient } from "./mock-provider-client";
+import { BackupService } from "./backup-service";
+import type { AppNotification } from "./system-integration";
+
+interface AppServiceOptions {
+  enableScheduledBackups?: boolean;
+  requestRestart?: () => void;
+  onSettingsChanged?: (settings: AppSettingsPayload) => void;
+  notify?: (notification: AppNotification) => void;
+}
 
 export class AppService {
   private readonly runtimes: Record<ProviderId, ProviderClient>;
@@ -105,12 +125,27 @@ export class AppService {
     ProviderId,
     ReturnType<typeof setTimeout>
   >();
+  private readonly backupService: BackupService;
+  private scheduledBackupMaintenance?: Promise<void>;
+  private pendingScheduledBackupRetention?: number;
+  private automaticBackupTimer?: ReturnType<typeof setInterval>;
+  private trashMaintenanceTimer?: ReturnType<typeof setInterval>;
+  private readonly pendingDataImports = new Map<
+    string,
+    { filePath: string; sha256: string; createdAt: number }
+  >();
 
   constructor(
     private readonly window: BrowserWindow,
     private readonly database: AppDatabase,
     private readonly userDataDir = "",
+    private readonly options: AppServiceOptions = {},
   ) {
+    this.backupService = new BackupService(
+      database,
+      userDataDir,
+      app.getVersion(),
+    );
     this.runtimes = Object.fromEntries(
       PROVIDER_IDS.map((id) => [id, this.createRuntime(id)]),
     ) as Record<ProviderId, ProviderClient>;
@@ -135,11 +170,16 @@ export class AppService {
 
   async initialize(): Promise<void> {
     const settings = this.getSettings();
+    this.database.purgeExpiredTrash(
+      settings.trashRetentionDays ?? DEFAULT_APP_SETTINGS.trashRetentionDays,
+    );
     this.applySettings(settings);
     this.emitSnapshot();
     if (this.autoSyncWebHistory && this.automaticWebHistorySyncAllowed()) {
       void this.startAutomaticWebHistorySync();
     }
+    this.handleAutomaticBackupSettings(settings);
+    this.startTrashMaintenance();
   }
 
   snapshot(): AppSnapshot {
@@ -482,6 +522,8 @@ export class AppService {
     this.database.setSettings(normalized);
     this.applySettings(normalized);
     this.handleAutoSyncSettingChange(wasAutoSyncEnabled);
+    this.handleAutomaticBackupSettings(normalized);
+    this.applyTrashRetention(normalized);
   }
 
   exportSettings(): string {
@@ -496,6 +538,8 @@ export class AppService {
     this.database.setSettings(normalized);
     this.applySettings(normalized);
     this.handleAutoSyncSettingChange(wasAutoSyncEnabled);
+    this.handleAutomaticBackupSettings(normalized);
+    this.applyTrashRetention(normalized);
     return normalized;
   }
 
@@ -587,6 +631,134 @@ export class AppService {
     if (error) throw new Error(error);
   }
 
+  listTrash(): TrashItem[] {
+    const settings = this.getSettings();
+    return this.database.listTrash(
+      settings.trashRetentionDays ?? DEFAULT_APP_SETTINGS.trashRetentionDays,
+    );
+  }
+
+  restoreTrash(type: TrashEntityType, id: string): void {
+    this.database.restoreTrash(type, id);
+    this.emitSnapshot();
+  }
+
+  purgeTrash(type: TrashEntityType, id: string): void {
+    this.database.purgeTrash(type, id);
+    this.emitSnapshot();
+  }
+
+  emptyTrash(): void {
+    this.database.emptyTrash();
+    this.emitSnapshot();
+  }
+
+  allowWebConversationReimport(
+    provider: ProviderId,
+    externalId: string,
+  ): void {
+    this.database.allowWebConversationReimport(provider, externalId);
+  }
+
+  async listBackups(): Promise<BackupManifestV1[]> {
+    return this.backupService.list();
+  }
+
+  async createBackup(): Promise<BackupCreateResult> {
+    const settings = this.getSettings();
+    return this.backupService.create(
+      "manual",
+      settings.backupRetentionDays ?? DEFAULT_APP_SETTINGS.backupRetentionDays,
+    );
+  }
+
+  async deleteBackup(backupId: string): Promise<void> {
+    await this.backupService.delete(backupId);
+  }
+
+  async previewBackupRestore(
+    backupId: string,
+  ): Promise<BackupRestorePreview> {
+    const preview = await this.backupService.previewRestore(backupId);
+    return {
+      ...preview,
+      warnings: [
+        this.uiText(
+          "Provider 网站 Cookie 和登录态不在备份中，恢复后保持不变。",
+          "Provider website cookies and login state are not part of this backup and will remain unchanged.",
+        ),
+        this.uiText(
+          "恢复将替换全部 AIHub 本地会话、设置、提示词和知识内容。",
+          "Restoring replaces all AIHub local conversations, settings, prompts, and knowledge content.",
+        ),
+      ],
+    };
+  }
+
+  async restoreBackup(backupId: string): Promise<BackupRestoreResult> {
+    const settings = this.getSettings();
+    const backup = await this.backupService.scheduleRestore(
+      backupId,
+      settings.backupRetentionDays ?? DEFAULT_APP_SETTINGS.backupRetentionDays,
+    );
+    setTimeout(() => this.options.requestRestart?.(), 100);
+    return { scheduled: true, backupId: backup.id };
+  }
+
+  async createPreUpdateBackup(): Promise<BackupManifestV1> {
+    const settings = this.getSettings();
+    return (
+      await this.backupService.create(
+        "pre-update",
+        settings.backupRetentionDays ??
+          DEFAULT_APP_SETTINGS.backupRetentionDays,
+      )
+    ).backup;
+  }
+
+  async resetData(request: DataResetRequest): Promise<DataResetResult> {
+    const settings = this.getSettings();
+    let backupId: string | undefined;
+    if (
+      request.createBackup &&
+      (request.scope === "local-content" || request.scope === "everything")
+    ) {
+      const result = await this.backupService.create(
+        "pre-reset",
+        settings.backupRetentionDays ??
+          DEFAULT_APP_SETTINGS.backupRetentionDays,
+      );
+      backupId = result.backup.id;
+    }
+    if (
+      request.scope === "provider-sessions" ||
+      request.scope === "everything"
+    ) {
+      for (const provider of PROVIDER_IDS) {
+        await this.clearProviderSiteData(provider);
+      }
+    }
+    if (
+      request.scope === "local-content" ||
+      request.scope === "everything"
+    ) {
+      this.database.clearLocalContent({
+        resetSettings: request.scope === "everything",
+      });
+      this.activeConversations.clear();
+      this.pendingMessageContexts.clear();
+      this.streamingMessages.clear();
+      if (request.scope === "everything") {
+        this.database.setSettings(DEFAULT_APP_SETTINGS);
+        this.applySettings(DEFAULT_APP_SETTINGS);
+      }
+      this.emitSnapshot();
+    }
+    const scheduledRestart = Boolean(this.options.requestRestart);
+    if (scheduledRestart) setTimeout(() => this.options.requestRestart?.(), 100);
+    return { scheduledRestart, backupId };
+  }
+
   async exportAllData(): Promise<DataExportResult> {
     const result = await dialog.showSaveDialog(this.window, {
       title: this.uiText("导出 AIHub 数据", "Export AIHub data"),
@@ -638,6 +810,121 @@ export class AppService {
         0,
       ),
     };
+  }
+
+  async previewDataImport(): Promise<DataImportPreview> {
+    this.prunePendingDataImports();
+    const result = await dialog.showOpenDialog(this.window, {
+      title: this.uiText("导入 AIHub 数据", "Import AIHub data"),
+      properties: ["openFile"],
+      filters: [{ name: "AIHub JSON", extensions: ["json"] }],
+    });
+    const filePath = result.filePaths[0];
+    if (result.canceled || !filePath) return { canceled: true };
+
+    const fileStat = await stat(filePath);
+    if (fileStat.size > 512 * 1024 * 1024) {
+      throw new Error(
+        this.uiText(
+          "数据文件超过 512 MB，无法安全导入。",
+          "The data file exceeds the 512 MB safety limit.",
+        ),
+      );
+    }
+    const buffer = await readFile(filePath);
+    const payload = appDataExportV1Schema.parse(
+      JSON.parse(buffer.toString("utf8").replace(/^\uFEFF/, "")) as unknown,
+    );
+    const analysis = this.database.analyzeDataImport(payload);
+    const token = randomUUID();
+    this.pendingDataImports.set(token, {
+      filePath,
+      sha256: createHash("sha256").update(buffer).digest("hex"),
+      createdAt: Date.now(),
+    });
+    const warnings = [
+      this.uiText(
+        "导入采用合并模式，不会覆盖现有同 ID 数据。",
+        "Import uses merge mode and never overwrites existing records with the same ID.",
+      ),
+    ];
+    if (analysis.skippedConflictCount > 0) {
+      warnings.push(
+        this.uiText(
+          `将忽略 ${analysis.skippedConflictCount} 条冲突数据。`,
+          `${analysis.skippedConflictCount} conflicting records will be skipped.`,
+        ),
+      );
+    }
+    if (analysis.ignoredKnowledgeDocumentCount > 0) {
+      warnings.push(
+        this.uiText(
+          `将忽略 ${analysis.ignoredKnowledgeDocumentCount} 条知识库元数据；导出文件不包含知识正文或原始路径。`,
+          `${analysis.ignoredKnowledgeDocumentCount} knowledge metadata records will be ignored; exports do not contain document text or original paths.`,
+        ),
+      );
+    }
+    if (analysis.adjustedDefaultPromptCount > 0) {
+      warnings.push(
+        this.uiText(
+          `已有默认提示词的 ${analysis.adjustedDefaultPromptCount} 个作用域将保留当前默认值；导入的提示词仍会保存为非默认。`,
+          `${analysis.adjustedDefaultPromptCount} scopes already have a default prompt. Existing defaults will remain, and imported prompts will be saved as non-default.`,
+        ),
+      );
+    }
+    return {
+      canceled: false,
+      token,
+      fileName: path.basename(filePath),
+      conversationCount: analysis.conversationCount,
+      messageCount: analysis.messageCount,
+      folderCount: analysis.folderCount,
+      tagCount: analysis.tagCount,
+      systemPromptCount: analysis.systemPromptCount,
+      conflictCount: analysis.skippedConflictCount,
+      ignoredKnowledgeDocumentCount:
+        analysis.ignoredKnowledgeDocumentCount,
+      adjustedDefaultPromptCount: analysis.adjustedDefaultPromptCount,
+      warnings,
+    };
+  }
+
+  async importAllData(token: string): Promise<DataImportResult> {
+    this.prunePendingDataImports();
+    const pending = this.pendingDataImports.get(token);
+    if (!pending) {
+      throw new Error(
+        this.uiText(
+          "导入预览已过期，请重新选择文件。",
+          "The import preview expired. Choose the file again.",
+        ),
+      );
+    }
+    const buffer = await readFile(pending.filePath);
+    const sha256 = createHash("sha256").update(buffer).digest("hex");
+    if (sha256 !== pending.sha256) {
+      this.pendingDataImports.delete(token);
+      throw new Error(
+        this.uiText(
+          "文件在预览后发生变化，请重新预览。",
+          "The file changed after preview. Preview it again.",
+        ),
+      );
+    }
+    const payload = appDataExportV1Schema.parse(
+      JSON.parse(buffer.toString("utf8").replace(/^\uFEFF/, "")) as unknown,
+    );
+    this.pendingDataImports.delete(token);
+    const imported = this.database.importAppData(payload);
+    this.emitSnapshot();
+    return imported;
+  }
+
+  private prunePendingDataImports(): void {
+    const cutoff = Date.now() - 30 * 60 * 1_000;
+    for (const [token, pending] of this.pendingDataImports) {
+      if (pending.createdAt < cutoff) this.pendingDataImports.delete(token);
+    }
   }
 
   async openExternal(url: string): Promise<void> {
@@ -831,6 +1118,77 @@ export class AppService {
     }
   }
 
+  private async ensureScheduledBackup(retentionDays: number): Promise<void> {
+    try {
+      await this.backupService.pruneScheduled(retentionDays);
+      if (await this.backupService.hasRecentScheduledBackup()) return;
+      await this.backupService.create("scheduled", retentionDays);
+    } catch (error) {
+      console.warn("Scheduled backup failed:", error);
+    }
+  }
+
+  private handleAutomaticBackupSettings(settings: AppSettingsPayload): void {
+    if (!this.options.enableScheduledBackups || !settings.automaticBackup) {
+      if (this.automaticBackupTimer) {
+        clearInterval(this.automaticBackupTimer);
+        this.automaticBackupTimer = undefined;
+      }
+      return;
+    }
+    this.requestScheduledBackupMaintenance(
+      settings.backupRetentionDays ??
+        DEFAULT_APP_SETTINGS.backupRetentionDays,
+    );
+    if (this.automaticBackupTimer) return;
+    this.automaticBackupTimer = setInterval(() => {
+      if (this.shuttingDown) return;
+      const current = this.getSettings();
+      if (!current.automaticBackup) return;
+      this.requestScheduledBackupMaintenance(
+        current.backupRetentionDays ??
+          DEFAULT_APP_SETTINGS.backupRetentionDays,
+      );
+    }, 60 * 60 * 1_000);
+    this.automaticBackupTimer.unref();
+  }
+
+  private requestScheduledBackupMaintenance(retentionDays: number): void {
+    if (this.shuttingDown) return;
+    this.pendingScheduledBackupRetention = retentionDays;
+    if (this.scheduledBackupMaintenance) return;
+    const requestedRetention = this.pendingScheduledBackupRetention;
+    this.pendingScheduledBackupRetention = undefined;
+    this.scheduledBackupMaintenance = this.ensureScheduledBackup(
+      requestedRetention,
+    )
+      .finally(() => {
+        this.scheduledBackupMaintenance = undefined;
+        const pendingRetention = this.pendingScheduledBackupRetention;
+        if (pendingRetention !== undefined) {
+          this.requestScheduledBackupMaintenance(pendingRetention);
+        }
+      });
+  }
+
+  private startTrashMaintenance(): void {
+    if (!this.options.enableScheduledBackups || this.trashMaintenanceTimer) {
+      return;
+    }
+    this.trashMaintenanceTimer = setInterval(() => {
+      if (!this.shuttingDown) this.applyTrashRetention(this.getSettings());
+    }, 60 * 60 * 1_000);
+    this.trashMaintenanceTimer.unref();
+  }
+
+  private applyTrashRetention(settings: AppSettingsPayload): void {
+    const purged = this.database.purgeExpiredTrash(
+      settings.trashRetentionDays ??
+        DEFAULT_APP_SETTINGS.trashRetentionDays,
+    );
+    if (purged > 0) this.emitSnapshot();
+  }
+
   async sendMessage(input: {
     provider: ProviderId;
     conversationId: string;
@@ -996,6 +1354,12 @@ export class AppService {
     let updated = 0;
     for (const ref of refs.slice(0, 500)) {
       const externalId = normalizeConversationUrl(ref.url);
+      if (
+        this.database.isWebConversationDeleted(provider, externalId) ||
+        this.database.isWebConversationDeleted(provider, ref.url)
+      ) {
+        continue;
+      }
       const existing =
         this.database.getConversationByExternalId(provider, externalId) ??
         this.database.getConversationByExternalId(provider, ref.url);
@@ -1092,6 +1456,11 @@ export class AppService {
               "history.sync-failed",
               error instanceof Error ? error.message : String(error),
             );
+            this.options.notify?.({
+              kind: "sync-failed",
+              provider,
+              preview: error instanceof Error ? error.message : String(error),
+            });
           }
         }
       }
@@ -1265,6 +1634,17 @@ export class AppService {
         throw new Error("Open a saved provider conversation before syncing.");
       }
       const externalId = normalizeConversationUrl(snapshot.url);
+      if (
+        this.database.isWebConversationDeleted(provider, externalId) ||
+        this.database.isWebConversationDeleted(provider, snapshot.url)
+      ) {
+        throw new Error(
+          this.uiText(
+            "该官网会话位于回收站中。请先恢复，或允许重新导入官网历史。",
+            "This website conversation is in Trash. Restore it or allow website history re-import first.",
+          ),
+        );
+      }
       let conversation =
         this.database.getConversationByExternalId(provider, externalId) ??
         this.database.getConversationByExternalId(provider, snapshot.url);
@@ -1925,6 +2305,15 @@ export class AppService {
   destroy(): void {
     this.shuttingDown = true;
     this.historySyncGeneration += 1;
+    this.pendingScheduledBackupRetention = undefined;
+    if (this.automaticBackupTimer) {
+      clearInterval(this.automaticBackupTimer);
+      this.automaticBackupTimer = undefined;
+    }
+    if (this.trashMaintenanceTimer) {
+      clearInterval(this.trashMaintenanceTimer);
+      this.trashMaintenanceTimer = undefined;
+    }
     for (const timer of this.conversationSyncTimers.values()) {
       clearTimeout(timer);
     }
@@ -2008,6 +2397,7 @@ export class AppService {
         reason: this.backendUnavailableReason(backend, provider),
       });
     }
+    this.options.onSettingsChanged?.(settings);
   }
 
   private uiText(zhCN: string, enUS: string): string {
@@ -2102,6 +2492,10 @@ export class AppService {
       this.providerEventDetail(event),
     );
 
+    const notificationConversationId =
+      this.streamingMessages.get(provider)?.conversationId ??
+      this.pendingMessageContexts.get(provider)?.conversationId ??
+      this.activeConversations.get(provider);
     if (event.type === "auth.changed") {
       const current = this.states.get(provider);
       this.updateProvider(provider, {
@@ -2124,6 +2518,22 @@ export class AppService {
       this.scheduleCurrentWebsiteSync(provider);
     } else {
       this.persistMessageEvent(provider, event);
+    }
+
+    if (event.type === "message.completed") {
+      this.options.notify?.({
+        kind: "generation-completed",
+        provider,
+        conversationId: notificationConversationId,
+        preview: messageToText(event.message),
+      });
+    } else if (event.type === "generation.failed") {
+      this.options.notify?.({
+        kind: "generation-failed",
+        provider,
+        conversationId: notificationConversationId,
+        preview: event.detail,
+      });
     }
 
     this.window.webContents.send("app:provider-event", provider, event);
@@ -2646,35 +3056,45 @@ function sanitizeConversationForExport(
 ): NormalizedConversation {
   return {
     ...conversation,
-    messages: conversation.messages.map((message) => ({
-      ...message,
-      providerHtml:
-        message.providerHtml && !containsLocalPath(message.providerHtml)
-          ? message.providerHtml
-          : undefined,
-      content: message.content.flatMap((block): ContentBlock[] => {
-        if (block.type === "attachment") {
-          return [
-            {
-              type: "attachment",
-              name: containsLocalPath(block.name)
-                ? path.win32.basename(block.name)
-                : block.name,
-            },
-          ];
-        }
-        if (block.type === "image" && containsLocalPath(block.src)) {
-          return [];
-        }
-        if (block.type === "citation" && containsLocalPath(block.url)) {
-          return [];
-        }
-        if (block.type === "html" && containsLocalPath(block.html)) {
-          return [];
-        }
-        return [block];
-      }),
-    })),
+    messages: conversation.messages.map((message) => {
+      const interrupted =
+        message.status === "pending" || message.status === "streaming";
+      return {
+        ...message,
+        providerHtml: undefined,
+        ...(interrupted
+          ? {
+              status: "failed" as const,
+              statusPhase: "failed" as const,
+              statusDetail: undefined,
+              errorCode: "exported_incomplete_message",
+              failureOrigin: "client" as const,
+            }
+          : {}),
+        content: message.content.flatMap((block): ContentBlock[] => {
+          if (block.type === "attachment") {
+            return [
+              {
+                type: "attachment",
+                name: containsLocalPath(block.name)
+                  ? path.win32.basename(block.name)
+                  : block.name,
+              },
+            ];
+          }
+          if (block.type === "image" && containsLocalPath(block.src)) {
+            return [];
+          }
+          if (block.type === "citation" && containsLocalPath(block.url)) {
+            return [];
+          }
+          if (block.type === "html" && containsLocalPath(block.html)) {
+            return [];
+          }
+          return [block];
+        }),
+      };
+    }),
   };
 }
 
