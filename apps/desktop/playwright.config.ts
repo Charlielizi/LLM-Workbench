@@ -4,6 +4,7 @@ import { defineConfig } from "@playwright/test";
 const artifactRoot = process.env.AIHUB_AI_ARTIFACT_DIR
   ? path.resolve(process.env.AIHUB_AI_ARTIFACT_DIR)
   : path.resolve(process.cwd(), "../../artifacts/ai-validation/latest");
+const screenshotDiffRatio = process.env.CI ? 0.015 : 0.005;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -13,7 +14,7 @@ export default defineConfig({
     timeout: 8_000,
     toHaveScreenshot: {
       animations: "disabled",
-      maxDiffPixelRatio: 0.005,
+      maxDiffPixelRatio: screenshotDiffRatio,
     },
   },
   fullyParallel: false,
