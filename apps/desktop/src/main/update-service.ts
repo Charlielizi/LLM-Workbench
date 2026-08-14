@@ -159,7 +159,7 @@ export class UpdateService {
       return this.setState({
         ...this.state,
         status: "error",
-        error: "Updates can only be downloaded by an installed AIHub build.",
+        error: "Updates can only be downloaded by an installed LLM Workbench build.",
       });
     }
     try {

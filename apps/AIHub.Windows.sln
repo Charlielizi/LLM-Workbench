@@ -3,9 +3,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AIHub.Windows", "windows-native\AIHub.Windows.csproj", "{A50BED82-4BAE-49BB-A1C8-9B84B79B704C}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LLM Workbench.Windows", "windows-native\AIHub.Windows.csproj", "{A50BED82-4BAE-49BB-A1C8-9B84B79B704C}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AIHub.Windows.Tests", "windows-native-tests\AIHub.Windows.Tests.csproj", "{7325BFE3-0C31-4E3B-8D80-7FC1BF6BDD2B}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LLM Workbench.Windows.Tests", "windows-native-tests\AIHub.Windows.Tests.csproj", "{7325BFE3-0C31-4E3B-8D80-7FC1BF6BDD2B}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

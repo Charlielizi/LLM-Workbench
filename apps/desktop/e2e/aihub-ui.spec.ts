@@ -16,17 +16,17 @@ test("onboards, creates a conversation, and renders a streamed mock reply", asyn
   await createChat(page);
 
   const composer = page.getByTestId("composer-input");
-  await composer.fill("[mock:slow] AIHub autonomous UI test");
+  await composer.fill("[mock:slow] LLM Workbench autonomous UI test");
   await activate(page.getByTestId("send-message"));
   await expect(composer).toHaveValue("");
 
   await expect(page.locator('[data-message-role="user"]')).toContainText(
-    "AIHub autonomous UI test",
+    "LLM Workbench autonomous UI test",
   );
   await expect(page.getByTestId("stop-generation")).toBeVisible();
   const assistant = page.locator('[data-message-role="assistant"]').last();
   await expect(assistant).toContainText(
-    "Mock ChatGPT reply: AIHub autonomous UI test",
+    "Mock ChatGPT reply: LLM Workbench autonomous UI test",
     { timeout: 12_000 },
   );
   await expect(assistant).toHaveAttribute("data-message-status", "completed");
@@ -329,10 +329,10 @@ test("opens and closes the mock provider drawer without covering the workspace",
     ))
     .toBeGreaterThan(0.42);
 
-  await activate(page.getByLabel("Hide AIHub client"));
+  await activate(page.getByLabel("Hide LLM Workbench client"));
   await expect(shell).toHaveAttribute("data-pane-layout", "provider-only");
   await expect(page.getByTestId("sidebar")).toHaveCount(0);
-  await activate(page.getByLabel("Show AIHub client"));
+  await activate(page.getByLabel("Show LLM Workbench client"));
   await expect(shell).toHaveAttribute("data-pane-layout", "split");
 
   await activate(page.getByLabel("Hide provider website"));
@@ -366,7 +366,7 @@ test("auto-resizes the composer and switches to one pane on narrow windows", asy
     "data-pane-layout",
     "provider-only",
   );
-  await activate(page.getByRole("button", { name: "AIHub", exact: true }));
+  await activate(page.getByRole("button", { name: "LLM Workbench", exact: true }));
   await expect(page.getByTestId("app-shell")).toHaveAttribute(
     "data-pane-layout",
     "client-only",
@@ -378,7 +378,7 @@ test("auto-resizes the composer and switches to one pane on narrow windows", asy
   );
 });
 
-test("rejects synthetic provider events while accepting AIHub trusted input", async ({ page, electronApp }) => {
+test("rejects synthetic provider events while accepting LLM Workbench trusted input", async ({ page, electronApp }) => {
   await completeOnboarding(page);
   await createChat(page);
   await activate(page.getByTitle("Open provider page"));

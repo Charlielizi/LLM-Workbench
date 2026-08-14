@@ -151,7 +151,7 @@ foreach ($dir in $userDataDirs) {
 }
 
 if ($Scenario -eq "background-send") {
-  Write-Host "Next step: start AIHub and leave the provider drawer closed until the smoke run completes."
+  Write-Host "Next step: start LLM Workbench and leave the provider drawer closed until the smoke run completes."
 } else {
-  Write-Host "Next step: start AIHub and keep the provider drawer visible until the smoke run completes."
+  Write-Host "Next step: start LLM Workbench and keep the provider drawer visible until the smoke run completes."
 }

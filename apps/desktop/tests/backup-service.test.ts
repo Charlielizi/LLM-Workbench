@@ -91,7 +91,7 @@ describe("BackupService", () => {
     await writeFile(manifestPath, JSON.stringify(manifest), "utf8");
 
     await expect(service.previewRestore(created.backup.id)).rejects.toThrow(
-      /newer AIHub version/i,
+      /newer LLM Workbench version/i,
     );
   });
 

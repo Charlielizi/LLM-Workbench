@@ -176,7 +176,7 @@ export class AppDatabase {
       ).user_version;
       if (currentVersion > DATABASE_SCHEMA_VERSION) {
         throw new Error(
-          `Database schema ${currentVersion} requires a newer AIHub version.`,
+          `Database schema ${currentVersion} requires a newer LLM Workbench version.`,
         );
       }
       this.migrate();

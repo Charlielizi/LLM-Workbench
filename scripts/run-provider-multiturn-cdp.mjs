@@ -67,11 +67,11 @@ const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then((response
 );
 const target = targets.find((item) =>
   item.type === "page" &&
-  item.title === "AIHub" &&
+  item.title === "LLM Workbench" &&
   item.webSocketDebuggerUrl
 );
 if (!target) {
-  throw new Error(`AIHub renderer target was not found on CDP port ${port}.`);
+    throw new Error(`LLM Workbench renderer target was not found on CDP port ${port}.`);
 }
 
 const socket = new WebSocket(target.webSocketDebuggerUrl);
@@ -485,7 +485,7 @@ async function captureProviderScreenshot(debugPort, providerUrl) {
     item.type === "page" &&
     item.webSocketDebuggerUrl &&
     item.url?.startsWith(origin) &&
-    item.title !== "AIHub"
+    item.title !== "LLM Workbench"
   );
   if (!providerTarget) return undefined;
   const providerSocket = new WebSocket(providerTarget.webSocketDebuggerUrl);

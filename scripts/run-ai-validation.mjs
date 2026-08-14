@@ -112,7 +112,7 @@ function markdownReport(report) {
         `| ${result.name} | ${result.status} | ${result.exitCode} | ${(result.durationMs / 1_000).toFixed(1)}s |`,
     )
     .join("\n");
-  return `# AIHub AI Validation Report
+  return `# LLM Workbench AI Validation Report
 
 - Run: ${report.runId}
 - Result: ${report.passed ? "PASS" : "FAIL"}

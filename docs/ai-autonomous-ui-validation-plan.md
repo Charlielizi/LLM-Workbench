@@ -1,8 +1,8 @@
-# AIHub AI 无人值守 UI 与交互验证计划
+# LLM Workbench AI 无人值守 UI 与交互验证计划
 
 版本：1.0
 
-适用基线：AIHub Electron 桌面端 `0.1.x`
+适用基线：LLM Workbench Electron 桌面端 `0.1.x`
 
 最后更新：2026-07-22
 
@@ -202,7 +202,7 @@ AI 视觉发现需要用 DOM/几何或重复截图二次确认：
 | ID | P | 自动动作 | 自动断言 |
 |---|---|---|---|
 | AUT-PROV-01 | P0 | 点击 Open provider page | drawer 出现；workspace 宽度收缩；composer/消息不被覆盖 |
-| AUT-PROV-02 | P0 | 关闭 drawer，等待 detach window，再触发后台 stream | drawer 不残留；AIHub 状态继续更新；完成后资源释放 |
+| AUT-PROV-02 | P0 | 关闭 drawer，等待 detach window，再触发后台 stream | drawer 不残留；LLM Workbench 状态继续更新；完成后资源释放 |
 | AUT-PROV-03 | P1 | 拖动 drawer 到 320/1200 边界和中间值 | 宽度钳制；拖动顺滑；sidebar/workspace 无重叠 |
 | AUT-PROV-04 | P0 | 依次点击 anchor、resync、recover、manual submit | 每次只有对应 loading/Toast；完成后按钮恢复；无重复调用 |
 | AUT-PROV-05 | P1 | 开/关 Clean Mode 并切换两个 provider | `aria-pressed` 与 provider 各自状态一致；互不串用 |
@@ -252,11 +252,11 @@ AI 视觉发现需要用 DOM/几何或重复截图二次确认：
 对每个已登录供应商，AI 执行以下最小闭环：
 
 1. 读取当前 runtime-info，确认只存在目标工作区实例。
-2. 打开 AIHub 对应会话，截图登录/ready 状态。
+2. 打开 LLM Workbench 对应会话，截图登录/ready 状态。
 3. 通过 smoke request 发送唯一 TD-01。
 4. 等待 user/assistant terminal state，同时监控 phase trace。
 5. 打开 provider drawer，确认网页中出现同一唯一文本和对应回复。
-6. 对 AIHub 消息区与 provider 网页各截图，并检查无重复/旧回复绑定。
+6. 对 LLM Workbench 消息区与 provider 网页各截图，并检查无重复/旧回复绑定。
 7. 关闭 drawer，执行 background-send；随后执行 resync-latest。
 8. 保存 smoke JSON、runtime instanceId、diagnostics、截图和最终判定。
 
@@ -337,7 +337,7 @@ artifacts/ai-validation/<run-id>/
 
 ## 10. 实现完成标准
 
-只有同时满足以下条件，AIHub 才具备本计划定义的“用户零参与测试”能力：
+只有同时满足以下条件，LLM Workbench 才具备本计划定义的“用户零参与测试”能力：
 
 - [ ] `pnpm test:ai -- --local-only` 可在干净机一次命令运行。
 - [ ] 56 个 AUT 用例全部实现；P0 不使用 skip。

@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { AppDatabase, DATABASE_SCHEMA_VERSION } from "../src/main/database";
 
 describe("AppDatabase schema compatibility", () => {
-  it("refuses to downgrade a database created by a newer AIHub version", async () => {
+  it("refuses to downgrade a database created by a newer LLM Workbench version", async () => {
     const directory = await mkdtemp(
       path.join(os.tmpdir(), "aihub-schema-test-"),
     );
@@ -17,7 +17,7 @@ describe("AppDatabase schema compatibility", () => {
       newer.close();
 
       expect(() => new AppDatabase(databasePath)).toThrow(
-        /requires a newer AIHub version/i,
+        /requires a newer LLM Workbench version/i,
       );
       const inspection = new DatabaseSync(databasePath, { readOnly: true });
       expect(

@@ -38,7 +38,7 @@ export function messageStatusLabel(message: Pick<
     }
     if (message.failureOrigin === "external") return "Provider unavailable";
     if (message.failureOrigin === "cancelled") return "Cancelled";
-    if (message.failureOrigin === "client") return "AIHub interaction failed";
+    if (message.failureOrigin === "client") return "LLM Workbench interaction failed";
     return phaseLabels[message.statusPhase ?? "failed"] ?? "Failed";
   }
   return undefined;

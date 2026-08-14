@@ -1,7 +1,7 @@
-# AIHub 完整验证测试计划
+# LLM Workbench 完整验证测试计划
 
 版本：1.0
-适用基线：AIHub `0.1.x`，Electron 桌面端为主，Windows Native 客户端为独立验证对象
+适用基线：LLM Workbench `0.1.x`，Electron 桌面端为主，Windows Native 客户端为独立验证对象
 最后更新：2026-07-22
 配套记录：[validation-test-run-template.md](./validation-test-run-template.md)
 AI 无人值守 UI 专项：[ai-autonomous-ui-validation-plan.md](./ai-autonomous-ui-validation-plan.md)
@@ -11,7 +11,7 @@ AI 无人值守 UI 专项：[ai-autonomous-ui-validation-plan.md](./ai-autonomou
 
 本计划用于回答四个发布问题：
 
-1. AIHub 的本地会话、消息、组织、知识、迁移和设置能力是否正确且不会丢数据。
+1. LLM Workbench 的本地会话、消息、组织、知识、迁移和设置能力是否正确且不会丢数据。
 2. 七个供应商网站变化、登录状态、网络波动或页面虚拟化时，发送链路是否可恢复、可诊断且不会串会话。
 3. Electron 的 IPC、浏览器隔离、外部导航和富内容渲染是否守住安全边界。
 4. Windows 安装包能否在干净环境安装、升级、卸载并保留用户数据。
@@ -20,7 +20,7 @@ AI 无人值守 UI 专项：[ai-autonomous-ui-validation-plan.md](./ai-autonomou
 
 - 不丢失已完成的用户消息、助手消息、设置或会话组织信息。
 - 不把 A 会话或 A 供应商的事件写入 B 会话。
-- 不出现供应商网页已经完成回复而 AIHub 长期无结果且无法诊断或恢复的情况。
+- 不出现供应商网页已经完成回复而 LLM Workbench 长期无结果且无法诊断或恢复的情况。
 - 不泄露登录 Cookie、API Key、用户文件内容或敏感诊断数据。
 - 所有对外宣称“支持”的供应商都具备登录后的真实端到端证据。
 - 安装包与源码基线一致，自动化门禁全部通过，可回滚到上一个可用版本。
@@ -153,7 +153,7 @@ AI 无人值守 UI 专项：[ai-autonomous-ui-validation-plan.md](./ai-autonomou
 | 数据 ID | 内容特征 | 用途 |
 |---|---|---|
 | TD-01 | `只回复：AIHUB-SMOKE-<timestamp>` | 唯一性、重复与串线检查 |
-| TD-02 | 中文、English、emoji：`你好 AIHub 🌏 café` | Unicode 与编码 |
+| TD-02 | 中文、English、emoji：`你好 LLM Workbench 🌏 café` | Unicode 与编码 |
 | TD-03 | 要求输出标题、列表、表格、代码块 | Markdown/代码渲染 |
 | TD-04 | 要求输出行内公式和块公式 | KaTeX/MathJax 抽取 |
 | TD-05 | 要求分 20 点逐步生成 | 慢流式、取消、完成检测 |
@@ -247,7 +247,7 @@ pnpm smoke:provider -- -Provider doubao -Scenario background-send
 pnpm --filter @aihub/desktop package
 ```
 
-保存 `AIHub-Setup.exe`、SHA-256、大小、生成时间、commit 和完整构建日志。随后在 E2/E3 执行 PKG 用例。
+保存 `LLM-Workbench-Setup.exe`、SHA-256、大小、生成时间、commit 和完整构建日志。随后在 E2/E3 执行 PKG 用例。
 
 ### 7.7 推荐执行顺序
 
@@ -308,7 +308,7 @@ pnpm --filter @aihub/desktop package
 | GATE-01 | P0 | A | 冻结锁文件安装；运行全量 typecheck/test | 命令退出码 0；无锁文件漂移；警告已解释 |
 | GATE-02 | P0 | A+M | 运行开发构建，观察 bootstrap 日志 | 主窗口可交互；无未处理异常；运行实例信息生成 |
 | APP-01 | P0 | M | 清空测试 userData 后首次启动并完成 onboarding | 首屏、默认供应商和设置正确；重启不重复 onboarding |
-| APP-02 | P0 | M | 连续启动第二个 AIHub 实例 | 只保留一个主实例；已有窗口被恢复/聚焦；数据目录无竞争损坏 |
+| APP-02 | P0 | M | 连续启动第二个 LLM Workbench 实例 | 只保留一个主实例；已有窗口被恢复/聚焦；数据目录无竞争损坏 |
 | APP-03 | P0 | M | 创建会话并发送，正常关闭后重启 | 已完成数据完整；窗口恢复可用；供应商登录会话仍隔离持久化 |
 | APP-04 | P0 | M | 流式中关闭应用，再次启动 | 不崩溃；旧流不会继续写错会话；非终态有明确失败/恢复表现 |
 | APP-05 | P1 | M | 最小化、恢复、切换显示器、休眠唤醒 | 布局不丢失；ProviderView 不覆盖错误区域；恢复后可发送 |
@@ -420,7 +420,7 @@ pnpm --filter @aihub/desktop package
 | ID | P | 类型 | 场景 | 关键通过标准 |
 |---|---|---|---|---|
 | PVD-01 | P0 | M | 首次打开、登录、重启 | 登录可完成；会话只保存在该 provider partition；重启仍有效 |
-| PVD-02 | P0 | A+M | 新会话正常发送 TD-01 | 阶段有序；网页与 AIHub 各一条回复；runtime 匹配 |
+| PVD-02 | P0 | A+M | 新会话正常发送 TD-01 | 阶段有序；网页与 LLM Workbench 各一条回复；runtime 匹配 |
 | PVD-03 | P0 | A+M | 慢首 token 与长流式 TD-05 | 不提前失败/完成；同一助手消息持续更新 |
 | PVD-04 | P0 | A+M | 生成中取消 | 停止控件/状态正确；可立即继续新消息 |
 | PVD-05 | P0 | A+M | 旧长会话、滚动触发虚拟列表后发送 | `bound-after-anchor` 指向新回复；不抓用户卡片/旧回复 |
@@ -501,7 +501,7 @@ pnpm --filter @aihub/desktop package
 
 | ID | P | 类型 | 场景与步骤 | 通过标准 |
 |---|---|---|---|---|
-| PKG-01 | P0 | M | 从冻结基线生成 Squirrel 安装包 | 生成 `AIHub-Setup.exe`；日志无失败；版本/产品名/作者信息正确 |
+| PKG-01 | P0 | M | 从冻结基线生成 Squirrel 安装包 | 生成 `LLM-Workbench-Setup.exe`；日志无失败；版本/产品名/作者信息正确 |
 | PKG-02 | P0 | M | E2 标准用户干净安装并首次启动 | 安装成功；快捷方式和启动项符合设计；应用功能基线通过 |
 | PKG-03 | P0 | M | 安装后执行 APP-01、MSG-02、DATA-03、SEC-02 | 打包版与开发版核心行为一致；preload/asar 资源完整 |
 | PKG-04 | P0 | M | E3 从上一版本覆盖升级 | 会话、设置、提示词、文档关系和登录 session 保留；迁移只执行一次 |
@@ -595,7 +595,7 @@ docs/validation-runs/YYYY-MM-DD_<version>_<short-sha>/
 规则：
 
 - 文件名使用 `<case-id>_<provider>_<result>_<timestamp>`。
-- 截图必须包含 AIHub 状态和时间；实站失败同时保留 provider page。
+- 截图必须包含 LLM Workbench 状态和时间；实站失败同时保留 provider page。
 - Smoke JSON 需保存 `runtime.instanceId`，并与本次运行信息核对。
 - 日志和诊断归档前检查 API Key、Authorization、Cookie、账号和敏感正文。
 - 安装包不直接提交 Git；只保存受控发布存储位置、哈希和构建日志。

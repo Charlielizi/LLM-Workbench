@@ -1,0 +1,109 @@
+name: Windows release (SignPath)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+    env:
+      AIHUB_RELEASE_BUILD: "1"
+      AIHUB_SIGNING_MODE: signpath
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve update feed URL
+        shell: pwsh
+        run: |
+          $version = node -p "require('./apps/desktop/package.json').version"
+          $feed = "https://update.electronjs.org/$env:GITHUB_REPOSITORY/win32-x64/$version/"
+          "AIHUB_UPDATE_URL=$feed" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "Release version: $version"
+          "Update feed: $feed"
+
+      - name: Typecheck
+        run: pnpm --filter @aihub/desktop typecheck
+
+      - name: Run desktop tests
+        run: pnpm --filter @aihub/desktop test
+
+      - name: Build unsigned Squirrel package
+        run: pnpm --filter @aihub/desktop package
+
+      - name: Upload installer for SignPath
+        id: upload-unsigned-installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-llm-workbench-setup
+          path: apps/desktop/out/make/squirrel.windows/x64/LLM-Workbench-Setup.exe
+
+      - name: Submit installer to SignPath
+        id: signpath
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.upload-unsigned-installer.outputs.artifact-id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-for-completion: true
+          output-artifact-directory: signed-installer
+
+      - name: Replace unsigned installer with signed installer
+        shell: pwsh
+        run: |
+          $signed = Get-ChildItem .\signed-installer -Filter "LLM-Workbench-Setup.exe" -Recurse |
+            Select-Object -First 1
+          if (-not $signed) {
+            throw "SignPath did not return LLM-Workbench-Setup.exe"
+          }
+          Copy-Item $signed.FullName `
+            .\apps\desktop\out\make\squirrel.windows\x64\LLM-Workbench-Setup.exe -Force
+
+          $signature = Get-AuthenticodeSignature `
+            .\apps\desktop\out\make\squirrel.windows\x64\LLM-Workbench-Setup.exe
+          if ($signature.Status -ne "Valid") {
+            throw "Installer signature is not valid: $($signature.Status)"
+          }
+          $signature | Format-List Status,SignerCertificate,TimeStamperCertificate
+
+      - name: Upload signed Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: llm-workbench-windows-${{ github.ref_name }}
+          path: apps/desktop/out/make/squirrel.windows/x64/
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            apps/desktop/out/make/squirrel.windows/x64/LLM-Workbench-Setup.exe
+            apps/desktop/out/make/squirrel.windows/x64/RELEASES
+            apps/desktop/out/make/squirrel.windows/x64/*.nupkg

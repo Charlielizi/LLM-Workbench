@@ -1,8 +1,14 @@
-# AIHub
+# LLM Workbench
+
+![LLM Workbench logo](apps/desktop/assets/llm-workbench.svg)
 
 Windows-first Electron prototype that presents ChatGPT, Claude, 豆包, Kimi,
 DeepSeek, 腾讯元宝（混元）and 千问 through one local interface while keeping
 each provider in an isolated persistent browser session.
+
+The public product name is **LLM Workbench**. Legacy bridge names such as
+`window.aihub`, `AIHUB_*`, `@aihub/*`, and the `aihub.sqlite` database filename
+remain stable so existing local data and automation scripts continue to work.
 
 ## Development
 
@@ -46,6 +52,12 @@ pnpm dev
 # In another terminal:
 pnpm test:real-providers
 ```
+
+## 免费 Windows 发布
+
+公开开源发布使用 SignPath Foundation 的免费签名，更新源使用 GitHub
+Release 与 `update.electronjs.org`。首次配置、GitHub Actions 变量和干净
+Windows 冒烟验证步骤见 [免费 Windows 发布路线](./docs/free-windows-release.md)。
 
 ### Native Windows build
 

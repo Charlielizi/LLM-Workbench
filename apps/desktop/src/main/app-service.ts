@@ -695,8 +695,8 @@ export class AppService {
           "Provider website cookies and login state are not part of this backup and will remain unchanged.",
         ),
         this.uiText(
-          "恢复将替换全部 AIHub 本地会话、设置、提示词和知识内容。",
-          "Restoring replaces all AIHub local conversations, settings, prompts, and knowledge content.",
+          "恢复将替换全部 LLM Workbench 本地会话、设置、提示词和知识内容。",
+          "Restoring replaces all LLM Workbench local conversations, settings, prompts, and knowledge content.",
         ),
       ],
     };
@@ -768,9 +768,9 @@ export class AppService {
 
   async exportAllData(): Promise<DataExportResult> {
     const result = await dialog.showSaveDialog(this.window, {
-      title: this.uiText("导出 AIHub 数据", "Export AIHub data"),
+      title: this.uiText("导出 LLM Workbench 数据", "Export LLM Workbench data"),
       defaultPath: `aihub-data-${new Date().toISOString().slice(0, 10)}.json`,
-      filters: [{ name: "AIHub JSON", extensions: ["json"] }],
+      filters: [{ name: "LLM Workbench JSON", extensions: ["json"] }],
     });
     if (result.canceled || !result.filePath) return { canceled: true };
 
@@ -822,9 +822,9 @@ export class AppService {
   async previewDataImport(): Promise<DataImportPreview> {
     this.prunePendingDataImports();
     const result = await dialog.showOpenDialog(this.window, {
-      title: this.uiText("导入 AIHub 数据", "Import AIHub data"),
+      title: this.uiText("导入 LLM Workbench 数据", "Import LLM Workbench data"),
       properties: ["openFile"],
-      filters: [{ name: "AIHub JSON", extensions: ["json"] }],
+      filters: [{ name: "LLM Workbench JSON", extensions: ["json"] }],
     });
     const filePath = result.filePaths[0];
     if (result.canceled || !filePath) return { canceled: true };

@@ -868,7 +868,7 @@ export const webConversationReimportSchema = z.object({
 
 export const dataResetRequestSchema = z.object({
   scope: z.enum(["local-content", "provider-sessions", "everything"]),
-  confirmation: z.literal("AIHub"),
+  confirmation: z.literal("LLM Workbench"),
   createBackup: z.boolean(),
 });
 

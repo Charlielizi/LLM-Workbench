@@ -18,6 +18,7 @@ import { useAppStore } from "../../stores/app-store";
 import { useSettingsStore } from "../../stores/settings-store";
 import { useI18n } from "../../i18n";
 import { usePaneLayoutStore } from "../../stores/pane-layout-store";
+import { Logo } from "../brand/Logo";
 
 interface MenuItem {
   label: string;
@@ -31,8 +32,6 @@ export function MenuBar() {
   const providers = useAppStore((state) => state.snapshot.providers);
   const theme = useSettingsStore((state) => state.theme);
   const setTheme = useSettingsStore((state) => state.setTheme);
-  const sidebarCollapsed = useSettingsStore((s) => s.sidebarCollapsed);
-  const setSidebarCollapsed = useSettingsStore((s) => s.setSidebarCollapsed);
   const setComparisonSetupOpen = useAppStore((s) => s.setComparisonSetupOpen);
   const openSettings = useAppStore((s) => s.openSettings);
   const setShortcutHelpOpen = useAppStore((s) => s.setShortcutHelpOpen);
@@ -205,7 +204,7 @@ export function TopBar() {
   return (
     <header className="panel-glass flex h-full items-center justify-between gap-3 px-4 [app-region:drag]">
       <div className="flex min-w-fit items-center gap-2">
-        <strong className="text-sm font-semibold tracking-tight">AIHub</strong>
+        <Logo color={theme === "dark" ? "white" : "primary"} size={25} />
         {narrowLayout && clientRequested && providerRequested && (
           <div
             className="flex rounded-full border border-[var(--color-border)] bg-[var(--color-bg-soft)] p-0.5 [app-region:no-drag]"
@@ -221,7 +220,7 @@ export function TopBar() {
               aria-pressed={activeNarrowPane === "client"}
               onClick={() => setActiveNarrowPane("client")}
             >
-              AIHub
+              LLM Workbench
             </button>
             <button
               type="button"

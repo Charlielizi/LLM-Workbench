@@ -4,29 +4,37 @@ import { VitePlugin } from "@electron-forge/plugin-vite";
 
 const certificateFile = process.env.AIHUB_WINDOWS_CERT_FILE;
 const certificatePassword = process.env.AIHUB_WINDOWS_CERT_PASSWORD;
+const signingMode = process.env.AIHUB_SIGNING_MODE ?? "pfx";
+const isExternalSigning = signingMode === "signpath";
+const hasPfxSigning = Boolean(certificateFile && certificatePassword);
+if (signingMode !== "pfx" && !isExternalSigning) {
+  throw new Error(
+    "AIHUB_SIGNING_MODE must be either 'pfx' or 'signpath'.",
+  );
+}
 if (
   process.env.AIHUB_RELEASE_BUILD === "1" &&
-  (!certificateFile ||
-    !certificatePassword ||
+  ((!hasPfxSigning && !isExternalSigning) ||
     !process.env.AIHUB_UPDATE_URL?.startsWith("https://"))
 ) {
   throw new Error(
-    "Release builds require AIHUB_WINDOWS_CERT_FILE, " +
-      "AIHUB_WINDOWS_CERT_PASSWORD, and an HTTPS AIHUB_UPDATE_URL.",
+    "Release builds require either PFX signing credentials or " +
+      "AIHUB_SIGNING_MODE=signpath, plus an HTTPS AIHUB_UPDATE_URL.",
   );
 }
 
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
-    executableName: "AIHub",
+    name: "llm-workbench",
+    executableName: "LLMWorkbench",
   },
   rebuildConfig: {},
   makers: [
     new MakerSquirrel({
-      name: "aihub",
-      setupExe: "AIHub-Setup.exe",
-      ...(certificateFile && certificatePassword
+      name: "llm-workbench",
+      setupExe: "LLM-Workbench-Setup.exe",
+      ...(hasPfxSigning && !isExternalSigning
         ? { certificateFile, certificatePassword }
         : {}),
     }),

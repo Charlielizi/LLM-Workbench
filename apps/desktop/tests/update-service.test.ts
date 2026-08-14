@@ -82,7 +82,7 @@ describe("UpdateService", () => {
     electronMocks.listeners.get("update-downloaded")?.(
       {},
       "Release notes",
-      "AIHub 0.2.0",
+      "LLM Workbench 0.2.0",
     );
     await service.install();
     expect(beforeInstall).toHaveBeenCalledOnce();

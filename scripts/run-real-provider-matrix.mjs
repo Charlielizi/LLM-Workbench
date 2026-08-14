@@ -97,7 +97,7 @@ await writeFile(
 await writeFile(
   path.join(artifactRoot, "report.md"),
   [
-    "# AIHub Real Provider Equivalence Matrix",
+    "# LLM Workbench Real Provider Equivalence Matrix",
     "",
     `- Result: ${passed ? "PASS" : "FAIL"}`,
     `- CDP port: ${port}`,
@@ -109,7 +109,7 @@ await writeFile(
       `| ${result.provider} | ${result.status} | ${result.summary?.completedRounds ?? 0} | ${result.summary?.conversationId ?? "-"} |`,
     ),
     "",
-    "Each completed round verifies exactly one marker, minimum answer length, and equality between the normalized AIHub body hash and the provider website body hash.",
+    "Each completed round verifies exactly one marker, minimum answer length, and equality between the normalized LLM Workbench body hash and the provider website body hash.",
     "",
   ].join("\n"),
   "utf8",

@@ -40,7 +40,6 @@ export function Sidebar() {
   const { t } = useI18n();
   const [providerFilter, setProviderFilter] =
     useState<ProviderFilter>("all");
-  const [folderFilter, setFolderFilter] = useState<string>("all");
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [syncingHistory, setSyncingHistory] = useState(false);
@@ -85,11 +84,7 @@ export function Sidebar() {
   const conversations = (searchResults ?? snapshotConversations).filter(
     (conversation) =>
       (providerFilter === "all" ||
-        conversation.provider === providerFilter) &&
-      (folderFilter === "all" ||
-        (folderFilter === "none"
-          ? !conversation.folderId
-          : conversation.folderId === folderFilter)),
+        conversation.provider === providerFilter),
   );
   const selectedConversationIds = [...selectedIds];
 

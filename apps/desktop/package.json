@@ -2,8 +2,8 @@
   "name": "@aihub/desktop",
   "version": "0.1.0-rc.1",
   "private": true,
-  "author": "AIHub contributors",
-  "description": "Unified local desktop client for provider websites",
+  "author": "LLM Workbench contributors",
+  "description": "Unified local desktop workbench for large language model providers",
   "main": ".vite/build/main.js",
   "scripts": {
     "start": "electron-forge start",
@@ -19,7 +19,6 @@
     "@aihub/core": "workspace:*",
     "@tailwindcss/vite": "^4.3.1",
     "electron-squirrel-startup": "^1.0.1",
-    "highlight.js": "^11.11.1",
     "katex": "^0.16.25",
     "lucide-react": "^1.21.0",
     "pdfjs-dist": "^6.0.227",

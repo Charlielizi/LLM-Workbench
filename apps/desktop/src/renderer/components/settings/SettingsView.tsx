@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import {
   ArrowDown,
   ArrowLeft,
@@ -18,7 +18,6 @@ import {
   Monitor,
   Plus,
   RefreshCw,
-  RotateCcw,
   Settings,
   Sparkles,
   Tag,
@@ -1079,10 +1078,10 @@ function DataSection() {
           : scope === "provider-sessions"
             ? t("settings.resetProviderSessionsDescription")
             : t("settings.resetEverythingDescription"),
-      placeholder: "AIHub",
+      placeholder: "LLM Workbench",
       confirmLabel: t("common.clear"),
     });
-    if (confirmation !== "AIHub") {
+    if (confirmation !== "LLM Workbench") {
       if (confirmation !== undefined) {
         addToast(t("settings.resetConfirmationMismatch"), "warning");
       }
@@ -1091,7 +1090,7 @@ function DataSection() {
     try {
       await window.aihub.resetData({
         scope,
-        confirmation: "AIHub",
+        confirmation: "LLM Workbench",
         createBackup: scope !== "provider-sessions",
       });
       addToast(t("settings.resetScheduled"), "success", 8_000);
@@ -1716,7 +1715,7 @@ function AboutSection() {
         description={t("settings.aboutDescription")}
       />
       <div className="space-y-3 rounded-xl border border-[var(--color-border)] p-5 text-sm leading-6 text-[var(--color-text-secondary)]">
-        <p>AIHub {update?.currentVersion ?? "0.1.0"}</p>
+        <p>LLM Workbench {update?.currentVersion ?? "0.1.0"}</p>
         <p>{t("settings.localDataDescription")}</p>
       </div>
       <div className="mt-5 grid gap-4 rounded-xl border border-[var(--color-border)] p-5">

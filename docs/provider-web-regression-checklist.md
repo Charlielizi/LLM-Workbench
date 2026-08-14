@@ -25,7 +25,7 @@ powershell -ExecutionPolicy Bypass -File scripts/request-provider-smoke.ps1 -Pro
 powershell -ExecutionPolicy Bypass -File scripts/watch-provider-smoke.ps1 -Provider doubao -Scenario background-send -TimeoutSeconds 150
 ```
 
-The goal is not just "message sent successfully". The goal is to prove that AIHub and the provider website stay synchronized across:
+The goal is not just "message sent successfully". The goal is to prove that LLM Workbench and the provider website stay synchronized across:
 
 - normal send and stream
 - delayed first token
@@ -39,7 +39,7 @@ The goal is not just "message sent successfully". The goal is to prove that AIHu
 - Start the desktop app with a clean development build:
   - `pnpm --filter @aihub/desktop test -- --run app-service.test.ts provider-preload-integration.test.ts`
   - `pnpm typecheck`
-- Make sure the target provider website is already reachable in AIHub.
+- Make sure the target provider website is already reachable in LLM Workbench.
 - Use a provider account that is stable enough to send several messages in a row.
 - Keep the provider drawer visible for ordinary cases; the background-send case must keep it closed for the entire send and reply.
 
@@ -54,12 +54,12 @@ To trigger the built-in smoke request on Windows:
     - `pnpm smoke:matrix -- -Providers doubao,qianwen,hunyuan`
 - to summarize the latest smoke JSON files across providers:
   - `pnpm smoke:summary`
-- by default, the smoke scripts now target only the newest live AIHub runtime
+- by default, the smoke scripts now target only the newest live LLM Workbench runtime
   diagnostics directory instead of broadcasting to every historical
-  `AIHub` / `@aihub/desktop` / `Electron` directory
+  `LLM Workbench` / `@aihub/desktop` / `Electron` directory
 - optional explicit user-data root:
-  - `pnpm smoke:provider -- -Provider qianwen -UserDataDir "C:\Users\<you>\AppData\Roaming\AIHub"`
-  - `pnpm smoke:watch -- -Provider qianwen -UserDataDir "C:\Users\<you>\AppData\Roaming\AIHub"`
+  - `pnpm smoke:provider -- -Provider qianwen -UserDataDir "C:\Users\<you>\AppData\Roaming\AIHub"` (legacy data path)
+  - `pnpm smoke:watch -- -Provider qianwen -UserDataDir "C:\Users\<you>\AppData\Roaming\AIHub"` (legacy data path)
 
 ## Debug Controls
 
@@ -82,7 +82,7 @@ During successful web-provider sends, expect these phases in order:
 
 1. `checking-auth`
 2. `capturing-anchor`
-3. `typing-message` when text is injected by AIHub
+3. `typing-message` when text is injected by LLM Workbench
 4. `submitting`
 5. `confirming-submit`
 6. `waiting-first-token`
@@ -112,13 +112,13 @@ If time is limited, prioritize the Chinese providers first because their DOM and
 ### Case 1: Normal Send
 
 1. Create a fresh conversation.
-2. Send a short prompt from AIHub.
+2. Send a short prompt from LLM Workbench.
 3. Wait for the reply to complete.
 
 Pass criteria:
 
 - the user message becomes `completed`
-- exactly one assistant message is created in AIHub
+- exactly one assistant message is created in LLM Workbench
 - assistant text matches the provider page
 - copied diagnostics show:
   - `binding=bound-after-anchor...`
@@ -132,7 +132,7 @@ Pass criteria:
 
 Pass criteria:
 
-- AIHub stays in `waiting-first-token` instead of failing early
+- LLM Workbench stays in `waiting-first-token` instead of failing early
 - once the provider starts streaming, the same assistant message continues
 - no duplicate assistant message appears
 
@@ -143,21 +143,21 @@ Pass criteria:
 
 Pass criteria:
 
-- AIHub does not mark completion while the provider still shows generation state or active network
+- LLM Workbench does not mark completion while the provider still shows generation state or active network
 - diagnostics eventually show `network=active` before final completion
 - completion only happens after network or generation indicators settle
 
 ### Case 4: Manual Recovery
 
 1. Switch the provider backend to `manual`.
-2. Send a prompt from AIHub.
+2. Send a prompt from LLM Workbench.
 3. Confirm the user message lands in `recoverable-blocked`.
 4. Fix any provider-side issue if needed.
 5. Use `Submit in provider page`.
 
 Pass criteria:
 
-- AIHub does not lose the original user message context
+- LLM Workbench does not lose the original user message context
 - the resumed send creates or resumes exactly one assistant reply
 - if the first manual submit fails, a second submit can still recover the same message path
 - provider summary failure state clears after successful completion
@@ -169,7 +169,7 @@ Pass criteria:
 
 Pass criteria:
 
-- AIHub records a recoverable failure, not a silent stall
+- LLM Workbench records a recoverable failure, not a silent stall
 - the failing phase is visible in provider diagnostics and provider summary
 - copied diagnostics include the blocker reason
 - after the blocker is cleared, submit or resync can continue without restarting the whole app
@@ -177,11 +177,11 @@ Pass criteria:
 ### Case 6: Missed Reply Resync
 
 1. Send a prompt and wait until the provider page clearly shows the assistant reply.
-2. Before AIHub fully reflects the reply, use `Resync latest provider reply`.
+2. Before LLM Workbench fully reflects the reply, use `Resync latest provider reply`.
 
 Pass criteria:
 
-- AIHub binds to the latest assistant after the active anchor
+- LLM Workbench binds to the latest assistant after the active anchor
 - no older assistant turn is incorrectly recovered
 - no duplicate assistant record is created
 
@@ -193,7 +193,7 @@ Pass criteria:
 
 Pass criteria:
 
-- AIHub binds to the new assistant turn only
+- LLM Workbench binds to the new assistant turn only
 - old assistant replies and recommendation cards are ignored
 - diagnostics still show `bound-after-anchor...`
 
@@ -220,7 +220,7 @@ For each provider and case, record:
 - final message result: pass or fail
 - copied provider diagnostics
 - smoke output JSON path when using the built-in provider smoke run
-- screenshot of AIHub and the provider page when failing
+- screenshot of LLM Workbench and the provider page when failing
 - exact blocker text if verification/login/rate limit appears
 
 When using the built-in smoke path, check the desktop diagnostics directory for:
@@ -258,4 +258,4 @@ The real-site regression pass is complete only if:
 - at least one virtual-list or long-conversation run covers Case 7
 - at least one provider verifies Case 8
 - every failure has copied diagnostics attached
-- there is no reproducible "provider page already replied but AIHub stayed stale" case left without a captured explanation
+- there is no reproducible "provider page already replied but LLM Workbench stayed stale" case left without a captured explanation

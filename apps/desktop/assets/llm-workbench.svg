@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="96" viewBox="0 0 360 96" fill="none">
+  <rect x="2" y="2" width="92" height="92" rx="26" fill="#0F172A"/>
+  <path d="M22 28h52M22 48h52M22 68h52" stroke="#22D3EE" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="22" cy="28" r="6" fill="#F59E0B"/>
+  <circle cx="48" cy="48" r="6" fill="#F59E0B"/>
+  <circle cx="74" cy="68" r="6" fill="#F59E0B"/>
+  <path d="m48 34 3.6 10.4L62 48l-10.4 3.6L48 62l-3.6-10.4L34 48l10.4-3.6L48 34Z" fill="#fff"/>
+  <text x="116" y="61" fill="#0F172A" font-family="Inter, Segoe UI, sans-serif" font-size="38" font-weight="700" letter-spacing="-1.2">LLM Workbench</text>
+</svg>

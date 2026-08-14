@@ -358,7 +358,7 @@ export interface TrashItem {
 
 export interface DataResetRequest {
   scope: "local-content" | "provider-sessions" | "everything";
-  confirmation: "AIHub";
+  confirmation: "LLM Workbench";
   createBackup: boolean;
 }
 

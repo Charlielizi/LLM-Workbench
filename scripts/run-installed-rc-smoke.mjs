@@ -14,7 +14,7 @@ const reportArgument = process.argv.find((value) =>
 );
 const executablePath = path.resolve(
   executableArgument?.slice("--executable=".length) ??
-    "C:/Users/li/AppData/Local/aihub/app-0.1.0-rc1/AIHub.exe",
+    "C:/Users/li/AppData/Local/llm-workbench/app-0.1.0-rc1/LLMWorkbench.exe",
 );
 const reportPath = reportArgument
   ? path.resolve(reportArgument.slice("--report=".length))

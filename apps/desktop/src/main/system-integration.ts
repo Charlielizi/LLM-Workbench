@@ -93,8 +93,8 @@ export class SystemIntegration {
       preferences.showPreview && notification.preview
         ? notification.preview.replace(/\s+/g, " ").trim().slice(0, 160)
         : useChinese
-          ? "点击返回 AIHub 查看详情。"
-          : "Click to return to AIHub for details.";
+          ? "点击返回 LLM Workbench 查看详情。"
+          : "Click to return to LLM Workbench for details.";
     const systemNotification = new Notification({ title, body });
     systemNotification.on("click", () => {
       this.showWindow();
@@ -117,8 +117,8 @@ export class SystemIntegration {
     const useChinese = this.useChinese();
     const notification = new Notification({
       title: useChinese
-        ? `AIHub ${version} 可用`
-        : `AIHub ${version} is available`,
+        ? `LLM Workbench ${version} 可用`
+        : `LLM Workbench ${version} is available`,
       body: useChinese
         ? "打开“设置 > 关于”可下载更新。"
         : "Open Settings > About to download the update.",
@@ -142,7 +142,7 @@ export class SystemIntegration {
       return;
     }
     this.tray = new Tray(createTrayIcon());
-    this.tray.setToolTip("AIHub");
+    this.tray.setToolTip("LLM Workbench");
     this.tray.on("click", () => this.showWindow());
     this.updateTrayMenu();
   }
@@ -153,7 +153,7 @@ export class SystemIntegration {
     this.tray.setContextMenu(
       Menu.buildFromTemplate([
         {
-          label: useChinese ? "打开 AIHub" : "Open AIHub",
+          label: useChinese ? "打开 LLM Workbench" : "Open LLM Workbench",
           click: () => this.showWindow(),
         },
         { type: "separator" },

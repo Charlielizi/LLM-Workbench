@@ -43,7 +43,7 @@ export class BackupService {
 
   constructor(
     private readonly database: AppDatabase,
-    private readonly userDataDir: string,
+    userDataDir: string,
     private readonly appVersion: string,
   ) {
     this.backupDir = path.join(userDataDir, BACKUP_DIRECTORY);
@@ -160,7 +160,7 @@ export class BackupService {
       },
       warnings: [
         "Provider website cookies and login state are not part of this backup and will remain unchanged.",
-        "Restoring replaces all AIHub local conversations, settings, prompts, and knowledge content.",
+        "Restoring replaces all LLM Workbench local conversations, settings, prompts, and knowledge content.",
       ],
       requiresRestart: true,
     };
@@ -402,7 +402,7 @@ async function hashFile(filePath: string): Promise<string> {
 function assertSupportedSchemaVersion(schemaVersion: number): void {
   if (schemaVersion > DATABASE_SCHEMA_VERSION) {
     throw new Error(
-      `Backup schema ${schemaVersion} requires a newer AIHub version.`,
+      `Backup schema ${schemaVersion} requires a newer LLM Workbench version.`,
     );
   }
 }

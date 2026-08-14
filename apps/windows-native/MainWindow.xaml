@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:AIHub.Windows"
-        Title="AIHub" Height="860" Width="1380" MinHeight="640" MinWidth="980"
+        Title="LLM Workbench" Height="860" Width="1380" MinHeight="640" MinWidth="980"
         Background="{DynamicResource AppBackground}"
         Foreground="{DynamicResource PrimaryText}"
         WindowStartupLocation="CenterScreen"
@@ -22,8 +22,8 @@
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="AIHub" FontSize="22" FontWeight="Bold"/>
-                    <TextBlock Text="  七模型工作台" Foreground="{DynamicResource SecondaryText}"
+                    <TextBlock Text="LLM Workbench" FontSize="22" FontWeight="Bold"/>
+                    <TextBlock Text="  大模型工作台" Foreground="{DynamicResource SecondaryText}"
                                VerticalAlignment="Center"/>
                 </StackPanel>
                 <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto"

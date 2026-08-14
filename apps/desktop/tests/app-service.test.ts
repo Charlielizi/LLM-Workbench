@@ -2269,7 +2269,7 @@ describe("AppService", () => {
 
     const result = await service.resetData({
       scope: "local-content",
-      confirmation: "AIHub",
+      confirmation: "LLM Workbench",
       createBackup: true,
     });
 

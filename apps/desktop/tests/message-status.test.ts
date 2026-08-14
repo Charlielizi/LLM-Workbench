@@ -39,7 +39,7 @@ describe("message-status", () => {
       statusPhase: "confirming-submit",
       errorCode: "provider_submit_not_confirmed",
       failureOrigin: "client",
-    })).toBe("AIHub interaction failed");
+    })).toBe("LLM Workbench interaction failed");
   });
 
   it("surfaces recoverable blocked messages even when they were persisted as completed", () => {

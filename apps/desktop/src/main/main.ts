@@ -85,7 +85,7 @@ async function createWindow(): Promise<void> {
     height: 820,
     minWidth: 960,
     minHeight: 640,
-    title: "AIHub",
+    title: "LLM Workbench",
     show: false,
     backgroundColor: "#101218",
     titleBarStyle: "hidden",
@@ -111,8 +111,8 @@ async function createWindow(): Promise<void> {
       type: "warning",
       title: useChinese ? "备份恢复失败" : "Backup restore failed",
       message: useChinese
-        ? "计划中的备份恢复未能完成，AIHub 将继续使用恢复前的数据。"
-        : "The scheduled backup restore could not be completed. AIHub will continue with the data from before the restore.",
+        ? "计划中的备份恢复未能完成，LLM Workbench 将继续使用恢复前的数据。"
+        : "The scheduled backup restore could not be completed. LLM Workbench will continue with the data from before the restore.",
       detail: restoreFailure,
     });
   }
@@ -125,8 +125,8 @@ async function createWindow(): Promise<void> {
       void dialog.showMessageBox(mainWindow!, {
         type: "error",
         title: app.getLocale().toLowerCase().startsWith("zh")
-          ? "AIHub 启动失败"
-          : "AIHub failed to start",
+          ? "LLM Workbench 启动失败"
+          : "LLM Workbench failed to start",
         message: app.getLocale().toLowerCase().startsWith("zh")
           ? "统一界面未能加载。"
           : "The unified interface could not be loaded.",
@@ -146,8 +146,8 @@ async function createWindow(): Promise<void> {
       type: "error",
       title: useChinese ? "无法打开本地数据" : "Local data could not be opened",
       message: useChinese
-        ? "数据库可能来自更新版本或已损坏。AIHub 未修改该数据库。"
-        : "The database may come from a newer version or be damaged. AIHub did not modify it.",
+        ? "数据库可能来自更新版本或已损坏。LLM Workbench 未修改该数据库。"
+        : "The database may come from a newer version or be damaged. LLM Workbench did not modify it.",
       detail,
     });
     systemIntegration.destroy();

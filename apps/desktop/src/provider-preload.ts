@@ -392,31 +392,6 @@ async function waitForReadyState(timeoutMs = 10_000): Promise<ProviderState> {
   return state;
 }
 
-function authInterruptionReason(): string | undefined {
-  const adapterReason = websiteAdapter.detectAuthInterruption();
-  if (adapterReason) {
-    return adapterReason;
-  }
-  const authBlocker = (definition.authBlockerSelectors ?? [])
-    .flatMap((selector) => queryAllInRoots<HTMLElement>(selector))
-    .find((candidate) => visible(candidate));
-  if (authBlocker) {
-    return "Login or provider verification is blocking the composer.";
-  }
-  const loginMarker = firstInRoots(definition.loginMarkers);
-  if (loginMarker && !firstInRoots(definition.submitSelectors)) {
-    return "Login or provider verification is required before sending.";
-  }
-  const bodyText = document.body.innerText;
-  if (
-    /登录|手机号|下一步|用户协议|隐私政策/i.test(bodyText) &&
-    /next step|phone|\+86/i.test(bodyText.toLowerCase())
-  ) {
-    return "Login or provider verification interrupted message submission.";
-  }
-  return undefined;
-}
-
 function emitAuthIfChanged(): void {
   const authenticated = detectState().authenticated;
   if (authenticated !== lastAuthState) {
@@ -720,37 +695,6 @@ function hasStopButton(): boolean {
   return websiteAdapter.isGenerating() || Boolean(firstInRoots(definition.stopSelectors));
 }
 
-function recoverableBlockerReason(): string | undefined {
-  const configured = (definition.authBlockerSelectors ?? [])
-    .flatMap((selector) => queryAllInRoots<HTMLElement>(selector))
-    .find((candidate) => visible(candidate));
-  if (configured) {
-    return "Login or provider verification is blocking the provider page.";
-  }
-  const genericBlockers = queryAllInRoots<HTMLElement>(
-    "[role='alert']," +
-      "[role='dialog']," +
-      "[aria-modal='true']," +
-      "[class*='captcha']," +
-      "[class*='verify']," +
-      "[class*='verification']," +
-      "[class*='error']," +
-      "[class*='modal']," +
-      "[class*='toast']",
-  );
-  for (const candidate of genericBlockers) {
-    if (!visible(candidate)) continue;
-    const text = normalizedConversationText(candidate);
-    if (!text) continue;
-    if (/验证码|captcha/i.test(text)) return text;
-    if (/登录|登陆|login|sign in/i.test(text)) return text;
-    if (/验证|人机|安全|verify|verification|human|security/i.test(text)) return text;
-    if (/限流|频繁|限制|rate limit|too many/i.test(text)) return text;
-    if (/出错|错误|失败|重试|稍后|error|failed|try again/i.test(text)) return text;
-  }
-  return undefined;
-}
-
 function hasStreamingIndicator(): boolean {
   const root = assistantElement() ?? null;
   return websiteAdapter.hasStreamingIndicator(root);
@@ -1031,13 +975,6 @@ function dispatchInputEvents(element: HTMLElement, text: string): void {
   element.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
-function shouldUseCDPTextInsertion(element: HTMLElement): boolean {
-  return definition.submitWithEnter ||
-    providerId === "qianwen" ||
-    element.isContentEditable ||
-    element.getAttribute("contenteditable") === "true";
-}
-
 async function legacySetComposerText(element: HTMLElement, text: string): Promise<void> {
   element.focus();
   clearComposer(element);
@@ -1054,7 +991,7 @@ async function legacySetComposerText(element: HTMLElement, text: string): Promis
   // Method 1: Paste event (most reliable for React)
   const clipboardData = new DataTransfer();
   clipboardData.setData("text/plain", text);
-  const pasted = element.dispatchEvent(new ClipboardEvent("paste", {
+  element.dispatchEvent(new ClipboardEvent("paste", {
     bubbles: true,
     cancelable: true,
     clipboardData,
@@ -1133,24 +1070,6 @@ function submitConfirmTimeoutMs(): number {
   return typeof override === "number" && override > 0
     ? override
     : DEFAULT_SUBMIT_CONFIRM_TIMEOUT_MS;
-}
-
-function userTurnContainsSnippet(snippet: string, composer: HTMLElement): boolean {
-  if (!snippet) return false;
-  const candidates = queryAllInRoots<HTMLElement>(
-    "[data-message-author-role='user']," +
-      "[data-role='user']," +
-      "[data-message-role='user']," +
-      "[data-testid*='user']," +
-      "[class*='user-message']," +
-      "[class*='human-message']," +
-      ".justify-end",
-  );
-  return candidates.some((candidate) => {
-    if (candidate === composer || candidate.contains(composer)) return false;
-    if (!visible(candidate)) return false;
-    return normalizedConversationText(candidate).includes(snippet);
-  });
 }
 
 async function sentSuccessfully(
@@ -2354,7 +2273,7 @@ function injectProviderControls(): void {
     <button type="button" data-action="hide" title="Hide provider" aria-label="Hide provider">&#x25C0;</button>
     <button type="button" data-action="sync-current" title="Sync current conversation" aria-label="Sync current conversation" hidden>&#x21BB;</button>
     <button type="button" data-action="debug" title="Debug DOM" aria-label="Debug DOM" hidden>&#x1F41B;</button>
-    <button type="button" data-action="show-client" title="Show AIHub" aria-label="Show AIHub">&#x25B6;</button>
+    <button type="button" data-action="show-client" title="Show LLM Workbench" aria-label="Show LLM Workbench">&#x25B6;</button>
     <span class="status" role="status" aria-live="polite"></span>
   </div>`;
   const buttons = shadow.querySelectorAll("button");
@@ -2374,7 +2293,7 @@ function injectProviderControls(): void {
     void hostLocale.then((value: unknown) => {
       const chinese = value === "zh-CN";
       const hideLabel = chinese ? "隐藏官网" : "Hide provider website";
-      const showClientLabel = chinese ? "显示 AIHub" : "Show AIHub";
+      const showClientLabel = chinese ? "显示 LLM Workbench" : "Show LLM Workbench";
       hideBtn.title = hideLabel;
       hideBtn.setAttribute("aria-label", hideLabel);
       showClientBtn.title = showClientLabel;

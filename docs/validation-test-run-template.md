@@ -1,4 +1,4 @@
-# AIHub 验证测试执行记录
+# LLM Workbench 验证测试执行记录
 
 配套计划：[validation-test-plan.md](./validation-test-plan.md)
 

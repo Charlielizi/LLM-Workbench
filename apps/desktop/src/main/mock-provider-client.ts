@@ -849,7 +849,7 @@ function mockProviderHtml(provider: ProviderId, label: string): string {
       <span id="status" class="badge">ready</span>
     </header>
     <main>
-      <section class="card"><div class="label">Prompt</div><div id="prompt" class="content">Waiting for AIHub</div></section>
+      <section class="card"><div class="label">Prompt</div><div id="prompt" class="content">Waiting for LLM Workbench</div></section>
       <section class="card"><div class="label">Assistant</div><div id="response" class="content">No response yet</div></section>
       <section class="card fixture">
         <textarea id="fixture-composer" aria-label="Trusted mock composer"></textarea>
@@ -859,7 +859,7 @@ function mockProviderHtml(provider: ProviderId, label: string): string {
     <script>
       globalThis.__setMockProviderState = (state) => {
         document.querySelector('#status').textContent = state.status;
-        document.querySelector('#prompt').textContent = state.prompt || 'Waiting for AIHub';
+        document.querySelector('#prompt').textContent = state.prompt || 'Waiting for LLM Workbench';
         document.querySelector('#response').textContent = state.response || 'No response yet';
         document.body.classList.toggle('clean', Boolean(state.cleanMode));
       };
