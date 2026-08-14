@@ -6,5 +6,9 @@ export default defineConfig({
       process.env.AIHUB_UPDATE_URL ?? "",
     ),
   },
-  build: {},
+  build: {
+    rollupOptions: {
+      external: ["node:sqlite"],
+    },
+  },
 });
