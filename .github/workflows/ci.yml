@@ -51,6 +51,7 @@ jobs:
         run: pnpm --filter @aihub/desktop test:ai:e2e
 
       - name: Run Windows Native tests
+        if: always()
         shell: pwsh
         run: |
           if ([string]::IsNullOrWhiteSpace($env:WINDIR)) {

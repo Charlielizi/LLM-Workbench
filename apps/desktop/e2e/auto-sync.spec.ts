@@ -1,4 +1,5 @@
 import {
+  closeTestElectron,
   expect,
   launchTestElectron,
   test,
@@ -75,7 +76,7 @@ test("shows local history first and synchronizes website history idempotently", 
   )?.lastSyncedAt;
   expect(firstRemoteSyncedAt).toBeTruthy();
 
-  await electronApp.close();
+  await closeTestElectron(electronApp, testUserData);
   const restartedApp = await launchTestElectron(
     testUserData,
     "chatgpt",

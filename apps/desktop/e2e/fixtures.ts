@@ -234,6 +234,31 @@ export async function launchTestElectron(
   });
 }
 
+export async function closeTestElectron(
+  electronApp: ElectronApplication,
+  testUserData: string,
+): Promise<void> {
+  const electronProcess = electronApp.process();
+  await electronApp.close().catch(() => undefined);
+  await waitForExit(electronProcess, 5_000);
+  const runtimePid = readRuntimePid(testUserData);
+  if (runtimePid) {
+    await waitForPidExit(runtimePid, 5_000);
+    if (isProcessRunning(runtimePid)) {
+      terminateProcessTree(runtimePid);
+      await waitForPidExit(runtimePid, 2_000);
+    }
+  }
+  if (
+    electronProcess.exitCode === null &&
+    electronProcess.pid &&
+    electronProcess.pid !== runtimePid
+  ) {
+    terminateProcessTree(electronProcess.pid);
+    await waitForExit(electronProcess, 2_000);
+  }
+}
+
 function waitForExit(
   child: ReturnType<ElectronApplication["process"]>,
   timeoutMs: number,
