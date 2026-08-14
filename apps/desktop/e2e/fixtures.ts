@@ -59,7 +59,13 @@ export const test = base.extend<ElectronFixtures>({
         "electron-bootstrap-first-attempt",
       );
       const failedRuntimePid = terminateRuntimeFromUserData(testUserData);
-      if (failedRuntimePid) await waitForPidExit(failedRuntimePid, 2_000);
+      if (failedRuntimePid) {
+        await waitForPidExit(failedRuntimePid, 10_000);
+        if (isProcessRunning(failedRuntimePid)) {
+          terminateProcessTree(failedRuntimePid);
+          await waitForPidExit(failedRuntimePid, 5_000);
+        }
+      }
       if (historyFixtureProvider) {
         await resetHistoryDatabase(testUserData, historyFixtureProvider);
       }
@@ -372,7 +378,12 @@ async function removeTestUserData(testUserData: string): Promise<void> {
     path.basename(testUserData).startsWith("aihub-e2e-") &&
     path.dirname(testUserData) === os.tmpdir()
   ) {
-    await rm(testUserData, { recursive: true, force: true });
+    await rm(testUserData, {
+      recursive: true,
+      force: true,
+      maxRetries: 20,
+      retryDelay: 250,
+    });
   }
 }
 
@@ -410,10 +421,15 @@ async function resetHistoryDatabase(
   historyFixtureProvider: ProviderId,
 ): Promise<void> {
   const databasePath = path.join(testUserData, "aihub.sqlite");
+  const removeOptions = {
+    force: true,
+    maxRetries: 20,
+    retryDelay: 250,
+  } as const;
   await Promise.all([
-    rm(databasePath, { force: true }),
-    rm(`${databasePath}-shm`, { force: true }),
-    rm(`${databasePath}-wal`, { force: true }),
+    rm(databasePath, removeOptions),
+    rm(`${databasePath}-shm`, removeOptions),
+    rm(`${databasePath}-wal`, removeOptions),
   ]);
   seedHistoryDatabase(testUserData, historyFixtureProvider);
   seedTestLocale(testUserData);
