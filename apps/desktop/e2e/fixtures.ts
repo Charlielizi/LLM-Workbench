@@ -230,7 +230,7 @@ export async function launchTestElectron(
           }
         : {}),
     },
-    timeout: 20_000,
+    timeout: process.env.CI ? 60_000 : 20_000,
   });
 }
 
