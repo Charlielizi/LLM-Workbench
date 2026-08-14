@@ -149,7 +149,9 @@ export function AppShell({
 
   useLayoutEffect(() => {
     sendSurfaceLayout();
-    const layoutTimer = window.setTimeout(sendSurfaceLayout, 0);
+    const layoutTimers = [0, 100, 500].map((delay) =>
+      window.setTimeout(sendSurfaceLayout, delay),
+    );
     const shell = shellRef.current;
     const observer =
       shell && typeof ResizeObserver !== "undefined"
@@ -158,7 +160,7 @@ export function AppShell({
     if (shell) observer?.observe(shell);
     window.addEventListener("resize", queueSurfaceLayout);
     return () => {
-      window.clearTimeout(layoutTimer);
+      layoutTimers.forEach((timer) => window.clearTimeout(timer));
       observer?.disconnect();
       window.removeEventListener("resize", queueSurfaceLayout);
       if (frameRef.current !== undefined) {
