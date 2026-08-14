@@ -32,6 +32,7 @@ import {
   PROVIDER_MODES,
   type ProviderMode,
   type ProviderState,
+  type ProviderSurfaceLayout,
   type WebsiteConversationListSnapshot,
   type WebsiteConversationSnapshot,
 } from "@aihub/core";
@@ -57,11 +58,20 @@ interface PendingCompletion {
   timeout: NodeJS.Timeout;
 }
 
-const TOPBAR_HEIGHT = 84;
 const DETACH_DELAY_MS = 30_000;
 const SURFACE_SETTLE_MS = 150;
 const HIDDEN_VIEWPORT_WIDTH = 1024;
 const HIDDEN_VIEWPORT_HEIGHT = 720;
+
+function hiddenSurfaceLayout(): ProviderSurfaceLayout {
+  return {
+    surfaceVisible: false,
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+  };
+}
 
 export class ProviderRuntime implements ProviderClient {
   readonly id: ProviderId;
@@ -76,7 +86,7 @@ export class ProviderRuntime implements ProviderClient {
   private visible = false;
   private automationLeaseCount = 0;
   private generationSurfaceActive = false;
-  private drawerWidth = 520;
+  private surfaceLayout: ProviderSurfaceLayout = hiddenSurfaceLayout();
   private degraded = false;
   private generating = false;
   private initialized = false;
@@ -132,7 +142,12 @@ export class ProviderRuntime implements ProviderClient {
       webPreferences: {
         partition: `persist:provider-${this.id}`,
         preload: path.join(__dirname, "provider-preload.js"),
-        additionalArguments: [`--aihub-provider=${this.id}`],
+        additionalArguments: [
+          `--aihub-provider=${this.id}`,
+          ...(process.env.AIHUB_PROVIDER_DEBUG_CONTROLS === "1"
+            ? ["--aihub-provider-debug-controls"]
+            : []),
+        ],
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
@@ -468,7 +483,9 @@ export class ProviderRuntime implements ProviderClient {
     if (visible) {
       this.ensureAttached();
       this.layout();
-      this.view.webContents.focus();
+      if (this.surfaceLayout.surfaceVisible) {
+        this.view.webContents.focus();
+      }
       return;
     }
     if (this.attached) {
@@ -477,22 +494,28 @@ export class ProviderRuntime implements ProviderClient {
     }
   }
 
-  layout(drawerWidth?: number): void {
-    if (drawerWidth !== undefined) {
-      this.drawerWidth = drawerWidth;
+  layout(surfaceLayout?: ProviderSurfaceLayout): void {
+    if (surfaceLayout !== undefined) {
+      this.surfaceLayout = surfaceLayout;
     }
     if (!this.attached) return;
     const [width = 960, height = 640] = this.mainWindow.getContentSize();
-    const resolvedWidth = this.visible
-      ? Math.min(width, Math.max(320, this.drawerWidth))
+    const showSurface = this.visible && this.surfaceLayout.surfaceVisible;
+    const resolvedWidth = showSurface
+      ? Math.max(1, Math.round(width * this.surfaceLayout.width))
       : HIDDEN_VIEWPORT_WIDTH;
-    const resolvedHeight = this.visible
-      ? Math.max(100, height - TOPBAR_HEIGHT)
+    const resolvedHeight = showSurface
+      ? Math.max(1, Math.round(height * this.surfaceLayout.height))
       : HIDDEN_VIEWPORT_HEIGHT;
-    const x = this.visible ? width - resolvedWidth : width;
+    const x = showSurface
+      ? Math.round(width * this.surfaceLayout.x)
+      : width;
+    const y = showSurface
+      ? Math.round(height * this.surfaceLayout.y)
+      : 0;
     this.view.setBounds({
       x,
-      y: TOPBAR_HEIGHT,
+      y,
       width: resolvedWidth,
       height: resolvedHeight,
     });

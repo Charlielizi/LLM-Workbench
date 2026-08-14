@@ -13,6 +13,7 @@ import { UpdateService } from "./update-service";
 if (started) app.quit();
 
 configureTestUserData();
+configureE2ERendering();
 configureRemoteDebugging();
 
 installSafeConsole();
@@ -48,6 +49,13 @@ function configureRemoteDebugging(): void {
   }
   app.commandLine.appendSwitch("remote-debugging-port", String(port));
   app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
+}
+
+function configureE2ERendering(): void {
+  if (process.env.AIHUB_TEST_MODE !== "1") return;
+  app.commandLine.appendSwitch("disable-background-timer-throttling");
+  app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
+  app.commandLine.appendSwitch("disable-renderer-backgrounding");
 }
 
 async function createWindow(): Promise<void> {
@@ -91,6 +99,7 @@ async function createWindow(): Promise<void> {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      backgroundThrottling: process.env.AIHUB_TEST_MODE !== "1",
     },
   });
   mainWindow.removeMenu();

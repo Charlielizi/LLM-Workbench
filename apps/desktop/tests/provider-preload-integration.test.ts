@@ -141,7 +141,7 @@ describe("provider preload integration", () => {
     vi.restoreAllMocks();
   });
 
-  it("injects one current-conversation sync control with success, partial, and retry feedback", async () => {
+  it("keeps diagnostics hidden while retaining the internal sync recovery path", async () => {
     window.dispatchEvent(new Event("DOMContentLoaded"));
     window.dispatchEvent(new Event("DOMContentLoaded"));
     const host = await waitFor(() =>
@@ -152,8 +152,17 @@ describe("provider preload integration", () => {
       "button[data-action='sync-current']",
     );
     const status = host.shadowRoot?.querySelector<HTMLElement>(".status");
+    const debugButton = host.shadowRoot?.querySelector<HTMLButtonElement>(
+      "button[data-action='debug']",
+    );
+    const showClientButton = host.shadowRoot?.querySelector<HTMLButtonElement>(
+      "button[data-action='show-client']",
+    );
     expect(syncButton).toBeTruthy();
     expect(status).toBeTruthy();
+    expect(syncButton!.hidden).toBe(true);
+    expect(debugButton?.hidden).toBe(true);
+    expect(showClientButton?.hidden).toBe(false);
 
     syncButton!.click();
     expect(syncButton!.dataset.state).toBe("syncing");

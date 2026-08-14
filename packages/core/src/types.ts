@@ -175,6 +175,14 @@ export type CloseBehavior = "exit" | "minimize-to-tray";
 export type ContrastMode = "system" | "standard" | "high";
 export type UpdatePolicy = "manual" | "notify" | "auto-download";
 
+export interface ProviderSurfaceLayout {
+  surfaceVisible: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface NotificationPreferences {
   generationCompleted: boolean;
   generationFailed: boolean;
@@ -208,6 +216,7 @@ export interface AppSettingsPayload {
   sidebarWidth?: number;
   sidebarCollapsed?: boolean;
   providerDrawerWidth?: number;
+  providerSplitRatio?: number;
   hasCompletedOnboarding?: boolean;
   shortcuts?: Record<string, string>;
 }

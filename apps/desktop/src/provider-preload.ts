@@ -2340,6 +2340,7 @@ function injectProviderControls(): void {
     button{all:initial;box-sizing:border-box;display:grid;place-items:center;width:32px;height:32px;border-radius:50%;background:rgba(0,0,0,.58);color:#fff;font:600 16px/1 system-ui,-apple-system,"Segoe UI",sans-serif;cursor:pointer;border:1px solid rgba(255,255,255,.12);opacity:.58;transition:opacity .15s,background .15s,transform .15s}
     button:hover{opacity:1;background:rgba(0,0,0,.78)}
     button:focus-visible{outline:2px solid #60a5fa;outline-offset:2px}
+    button[hidden]{display:none}
     button:disabled{cursor:wait;opacity:.82}
     button[data-state="syncing"]{animation:aihub-spin .8s linear infinite}
     button[data-state="success"]{background:rgba(22,101,52,.9);opacity:1}
@@ -2351,15 +2352,37 @@ function injectProviderControls(): void {
   </style>
   <div class="controls">
     <button type="button" data-action="hide" title="Hide provider" aria-label="Hide provider">&#x25C0;</button>
-    <button type="button" data-action="sync-current" title="Sync current conversation" aria-label="Sync current conversation">&#x21BB;</button>
-    <button type="button" data-action="debug" title="Debug DOM" aria-label="Debug DOM">&#x1F41B;</button>
+    <button type="button" data-action="sync-current" title="Sync current conversation" aria-label="Sync current conversation" hidden>&#x21BB;</button>
+    <button type="button" data-action="debug" title="Debug DOM" aria-label="Debug DOM" hidden>&#x1F41B;</button>
+    <button type="button" data-action="show-client" title="Show AIHub" aria-label="Show AIHub">&#x25B6;</button>
     <span class="status" role="status" aria-live="polite"></span>
   </div>`;
   const buttons = shadow.querySelectorAll("button");
   const hideBtn = buttons[0]!;
   const syncBtn = buttons[1]!;
   const debugBtn = buttons[2]!;
+  const showClientBtn = buttons[3]!;
   const status = shadow.querySelector<HTMLElement>(".status")!;
+  if (process.argv.includes("--aihub-provider-debug-controls")) {
+    debugBtn.hidden = false;
+  }
+  const updateHostLabels = () => {
+    const hostLocale =
+      typeof ipcRenderer.invoke === "function"
+        ? ipcRenderer.invoke("provider:get-host-locale")
+        : Promise.resolve(navigator.language);
+    void hostLocale.then((value: unknown) => {
+      const chinese = value === "zh-CN";
+      const hideLabel = chinese ? "隐藏官网" : "Hide provider website";
+      const showClientLabel = chinese ? "显示 AIHub" : "Show AIHub";
+      hideBtn.title = hideLabel;
+      hideBtn.setAttribute("aria-label", hideLabel);
+      showClientBtn.title = showClientLabel;
+      showClientBtn.setAttribute("aria-label", showClientLabel);
+    });
+  };
+  updateHostLabels();
+  window.addEventListener("focus", updateHostLabels);
   let resetTimer: number | undefined;
   const setSyncState = (
     state: "idle" | "syncing" | "success" | "partial" | "error",
@@ -2388,6 +2411,9 @@ function injectProviderControls(): void {
   };
   hideBtn.addEventListener("click", () => {
     void ipcRenderer.invoke("provider:hide-self");
+  });
+  showClientBtn.addEventListener("click", () => {
+    void ipcRenderer.invoke("provider:show-client");
   });
   syncBtn.addEventListener("click", () => {
     if (syncBtn.disabled) return;

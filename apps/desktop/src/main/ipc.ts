@@ -41,6 +41,7 @@ import {
   messageEditResendSchema,
   providerAdapterEventsQuerySchema,
   providerCleanModeSchema,
+  providerDebugDumpSchema,
   providerLayoutSchema,
   providerSmokeInspectionSchema,
   systemPromptCreateSchema,
@@ -331,12 +332,15 @@ export function registerIpc(
     );
   });
   ipcMain.handle("provider:set-layout", (_event, input) => {
-    const { width } = providerLayoutSchema.parse(input);
-    return service.setProviderLayout(width);
+    return service.setProviderLayout(providerLayoutSchema.parse(input));
   });
   ipcMain.handle("provider:hide-self", (event) => {
     service.hideProviderByWebContents(event.sender);
   });
+  ipcMain.handle("provider:show-client", (event) => {
+    service.showClientByWebContents(event.sender);
+  });
+  ipcMain.handle("provider:get-host-locale", () => service.getHostLocale());
   ipcMain.handle("provider:discover-models", (_event, provider) =>
     service.discoverProviderModels(providerIdSchema.parse(provider)),
   );
@@ -423,10 +427,12 @@ export function registerIpc(
   ipcMain.handle("transfer:confirm", (_event, input) =>
     service.confirmTransfer(transferConfirmSchema.parse(input)),
   );
-  ipcMain.handle("provider:debug-dump", (_event, data: string) => {
-    const outPath = join(process.cwd(), "debug-dump.txt");
-    writeFileSync(outPath, data, "utf-8");
-  });
+  if (process.env.AIHUB_PROVIDER_DEBUG_CONTROLS === "1") {
+    ipcMain.handle("provider:debug-dump", (_event, data) => {
+      const outPath = join(process.cwd(), "debug-dump.txt");
+      writeFileSync(outPath, providerDebugDumpSchema.parse(data), "utf-8");
+    });
+  }
 }
 
 function requireUpdateService(

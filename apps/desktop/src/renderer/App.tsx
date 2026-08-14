@@ -17,6 +17,7 @@ import { useAppStore } from "./stores/app-store";
 import { applyTheme, useSettingsStore } from "./stores/settings-store";
 import { useToastStore } from "./stores/toast-store";
 import { useI18n } from "./i18n";
+import { usePaneLayoutStore } from "./stores/pane-layout-store";
 
 export function App() {
   useKeyboard();
@@ -37,9 +38,6 @@ export function App() {
   const sidebarCollapsed = useSettingsStore(
     (state) => state.sidebarCollapsed,
   );
-  const providerDrawerWidth = useSettingsStore(
-    (state) => state.providerDrawerWidth,
-  );
   const initializeSettings = useSettingsStore(
     (state) => state.initializeFromMain,
   );
@@ -51,6 +49,12 @@ export function App() {
   );
   const workspaceView = useAppStore((state) => state.workspaceView);
   const selectConversation = useAppStore((state) => state.selectConversation);
+  const syncProviderVisibility = usePaneLayoutStore(
+    (state) => state.syncProviderVisibility,
+  );
+  const visibleProvider = useAppStore((state) =>
+    state.snapshot.providers.find((provider) => provider.websiteVisible),
+  );
 
   useEffect(() => {
     void initialize();
@@ -67,6 +71,14 @@ export function App() {
         selectConversation(conversationId);
       }),
     [selectConversation],
+  );
+
+  useEffect(
+    () =>
+      window.aihub.onShowClientPane(() => {
+        usePaneLayoutStore.getState().showClient();
+      }),
+    [],
   );
 
   useEffect(() => {
@@ -101,10 +113,9 @@ export function App() {
   }, [theme]);
 
   useEffect(() => {
-    if (providerDrawerOpen) {
-      void window.aihub.setProviderLayout(providerDrawerWidth);
-    }
-  }, [providerDrawerOpen, providerDrawerWidth]);
+    if (workspaceView === "settings") return;
+    syncProviderVisibility(visibleProvider?.id);
+  }, [syncProviderVisibility, visibleProvider?.id, workspaceView]);
 
   return (
     <AppShell

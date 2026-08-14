@@ -35,6 +35,7 @@ export const DEFAULT_APP_SETTINGS = {
   sidebarWidth: 270,
   sidebarCollapsed: false,
   providerDrawerWidth: 520,
+  providerSplitRatio: 0.42,
   hasCompletedOnboarding: false,
   shortcuts: {},
 } as const satisfies AppSettingsPayload;
@@ -86,9 +87,19 @@ export function normalizeAppSettings(
     sidebarWidth: merged.sidebarWidth,
     sidebarCollapsed: merged.sidebarCollapsed,
     providerDrawerWidth: merged.providerDrawerWidth,
+    providerSplitRatio: normalizeProviderSplitRatio(
+      merged.providerSplitRatio,
+    ),
     hasCompletedOnboarding: merged.hasCompletedOnboarding,
     shortcuts: { ...(base.shortcuts ?? {}), ...(settings.shortcuts ?? {}) },
   };
+}
+
+export function normalizeProviderSplitRatio(ratio?: number): number {
+  const value = Number.isFinite(ratio)
+    ? ratio!
+    : DEFAULT_APP_SETTINGS.providerSplitRatio;
+  return Math.min(0.7, Math.max(0.25, value));
 }
 
 function normalizeProviderOrder(order?: ProviderId[]): ProviderId[] {

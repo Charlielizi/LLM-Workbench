@@ -263,7 +263,7 @@ describe("ProviderRuntime", () => {
     );
     expect(electronMock.view.setBounds).toHaveBeenLastCalledWith({
       x: 1200,
-      y: 84,
+      y: 0,
       width: 1024,
       height: 720,
     });
@@ -377,6 +377,13 @@ describe("ProviderRuntime", () => {
       "provider:event",
       { type: "message.completed", message: completedMessage() },
     );
+    runtime.layout({
+      surfaceVisible: true,
+      x: 680 / 1200,
+      y: 84 / 800,
+      width: 520 / 1200,
+      height: 716 / 800,
+    });
     runtime.setVisible(true);
     await vi.advanceTimersByTimeAsync(30_000);
 
@@ -385,6 +392,49 @@ describe("ProviderRuntime", () => {
       x: 680,
       y: 84,
       width: 520,
+      height: 716,
+    });
+  });
+
+  it("keeps a requested provider attached while its responsive surface is hidden", async () => {
+    const { ProviderRuntime } = await import("../src/main/provider-runtime");
+    const mainWindow = windowStub();
+    const runtime = new ProviderRuntime({
+      mainWindow,
+      provider: "chatgpt",
+      onEvent: vi.fn(),
+    });
+
+    runtime.setVisible(true);
+    runtime.layout({
+      surfaceVisible: false,
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+    });
+    expect(runtime.isVisible()).toBe(true);
+    expect(mainWindow.contentView.addChildView).toHaveBeenCalledWith(
+      electronMock.view,
+    );
+    expect(electronMock.view.setBounds).toHaveBeenLastCalledWith({
+      x: 1200,
+      y: 0,
+      width: 1024,
+      height: 720,
+    });
+
+    runtime.layout({
+      surfaceVisible: true,
+      x: 0,
+      y: 0.105,
+      width: 1,
+      height: 0.895,
+    });
+    expect(electronMock.view.setBounds).toHaveBeenLastCalledWith({
+      x: 0,
+      y: 84,
+      width: 1200,
       height: 716,
     });
   });
@@ -407,7 +457,7 @@ describe("ProviderRuntime", () => {
     );
     expect(electronMock.view.setBounds).toHaveBeenLastCalledWith({
       x: 1200,
-      y: 84,
+      y: 0,
       width: 1024,
       height: 720,
     });

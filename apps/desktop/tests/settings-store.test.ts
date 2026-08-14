@@ -53,4 +53,15 @@ describe("settings persistence", () => {
       syncError: "second write failed",
     });
   });
+
+  it("normalizes the new split ratio while retaining the legacy drawer width", () => {
+    expect(normalizeAppSettings({
+      providerDrawerWidth: 640,
+      providerSplitRatio: 0.9,
+    })).toMatchObject({
+      providerDrawerWidth: 640,
+      providerSplitRatio: 0.7,
+    });
+    expect(normalizeAppSettings({}).providerSplitRatio).toBe(0.42);
+  });
 });

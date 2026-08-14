@@ -24,6 +24,7 @@ import type {
   ProviderMode,
   ProviderSmokeInspection,
   ProviderSmokeTestResult,
+  ProviderSurfaceLayout,
   OutgoingAttachment,
   SystemPrompt,
   SettingsImportPreview,
@@ -143,7 +144,7 @@ export interface AIHubApi {
     provider: ProviderId,
     visible: boolean,
   ): Promise<void>;
-  setProviderLayout(width: number): Promise<void>;
+  setProviderLayout(layout: ProviderSurfaceLayout): Promise<void>;
   discoverProviderModels(provider: ProviderId): Promise<void>;
   recoverProvider(provider: ProviderId): Promise<ProviderSummary>;
   clearProviderSiteData(provider: ProviderId): Promise<ProviderSummary>;
@@ -198,6 +199,7 @@ export interface AIHubApi {
     listener: (provider: ProviderId, event: ProviderEvent) => void,
   ): () => void;
   onOpenConversation(listener: (conversationId: string) => void): () => void;
+  onShowClientPane(listener: () => void): () => void;
   onUpdateState(listener: (state: UpdateState) => void): () => void;
 }
 

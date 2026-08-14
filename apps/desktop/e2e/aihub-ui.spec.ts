@@ -2,9 +2,13 @@ import { test, expect } from "./fixtures";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  activate,
   completeOnboarding,
   createChat,
+  dispatchInputKey,
+  dispatchKey,
   expectInsideViewport,
+  openContextMenu,
 } from "./helpers";
 
 test("onboards, creates a conversation, and renders a streamed mock reply", async ({ page }) => {
@@ -13,7 +17,8 @@ test("onboards, creates a conversation, and renders a streamed mock reply", asyn
 
   const composer = page.getByTestId("composer-input");
   await composer.fill("[mock:slow] AIHub autonomous UI test");
-  await page.getByTestId("send-message").click();
+  await activate(page.getByTestId("send-message"));
+  await expect(composer).toHaveValue("");
 
   await expect(page.locator('[data-message-role="user"]')).toContainText(
     "AIHub autonomous UI test",
@@ -26,6 +31,7 @@ test("onboards, creates a conversation, and renders a streamed mock reply", asyn
   );
   await expect(assistant).toHaveAttribute("data-message-status", "completed");
   await expect(page.getByTestId("send-message")).toBeVisible();
+  await expect(page.getByText("ChatGPT signed in", { exact: true })).toBeHidden();
   await expectInsideViewport(page, page.getByTestId("composer"));
   await expect(page).toHaveScreenshot("completed-chat.png");
 });
@@ -33,23 +39,23 @@ test("onboards, creates a conversation, and renders a streamed mock reply", asyn
 test("supports keyboard navigation, theme switching, settings, and search", async ({ page }) => {
   await completeOnboarding(page);
 
-  await page.keyboard.press("Control+k");
+  await dispatchKey(page, "k", { code: "KeyK", control: true });
   await expect(page.getByTestId("conversation-search")).toBeFocused();
-  await page.getByRole("banner").getByLabel("Toggle theme").click();
+  await activate(page.getByRole("banner").getByLabel("Toggle theme"));
   await expect(page.locator("html")).toHaveAttribute("data-theme", /dark|light/);
 
-  await page.getByTitle("Settings").last().click();
+  await activate(page.getByTitle("Settings").last());
   const settings = page.getByTestId("settings-view");
   await expectInsideViewport(page, settings);
   await expect(settings.locator("nav button")).toHaveCount(9);
-  await settings.getByRole("button", { name: "Appearance" }).click();
+  await activate(settings.getByRole("button", { name: "Appearance" }));
   await expect(settings.getByText("Interface scale")).toBeVisible();
-  await settings.getByTitle("Back to workspace").click();
+  await activate(settings.getByTitle("Back to workspace"));
   await expect(settings).toBeHidden();
 
-  await page.getByLabel("Hide", { exact: true }).click();
+  await activate(page.getByLabel("Hide", { exact: true }));
   await expect(page.getByLabel("Show", { exact: true })).toBeVisible();
-  await page.getByLabel("Show", { exact: true }).click();
+  await activate(page.getByLabel("Show", { exact: true }));
   await expect(page.getByTestId("new-conversation-chatgpt")).toBeVisible();
 });
 
@@ -57,9 +63,9 @@ test("persists appearance settings and keeps disabled-provider history usable", 
   await completeOnboarding(page);
   await createChat(page);
 
-  await page.getByTitle("Settings").last().click();
+  await activate(page.getByTitle("Settings").last());
   const settings = page.getByTestId("settings-view");
-  await settings.getByRole("button", { name: "Appearance" }).click();
+  await activate(settings.getByRole("button", { name: "Appearance" }));
   await settings.getByText("Interface scale").locator("..").getByRole("combobox")
     .selectOption("1.1");
   await settings.getByText("Density").locator("..").getByRole("combobox")
@@ -69,20 +75,22 @@ test("persists appearance settings and keeps disabled-provider history usable", 
   await expect(page.locator("html")).toHaveAttribute("data-density", "compact");
   await expect(page.locator("html")).toHaveAttribute("data-contrast", "high");
 
-  await settings.getByRole("button", { name: "Providers & sync" }).click();
-  await settings.getByLabel("Enabled ChatGPT").uncheck();
-  await settings.getByTitle("Back to workspace").click();
+  await activate(settings.getByRole("button", { name: "Providers & sync" }));
+  await activate(settings.getByRole("switch", {
+    name: "Use for new chats ChatGPT",
+  }));
+  await activate(settings.getByTitle("Back to workspace"));
   await expect(page.getByTestId("chat-view")).toBeVisible();
 
   await page.getByTestId("composer-input").fill("disabled history remains usable");
-  await page.getByTestId("send-message").click();
+  await activate(page.getByTestId("send-message"));
   await expect(page.locator('[data-message-role="assistant"]').last()).toContainText(
     "Mock ChatGPT reply: disabled history remains usable",
   );
 
-  await page.getByTestId("open-comparison").click();
+  await activate(page.getByTestId("open-comparison"));
   await expect(page.getByTestId("comparison-modal").getByText("ChatGPT")).toHaveCount(0);
-  await page.keyboard.press("Escape");
+  await dispatchKey(page, "Escape");
 
   await expect
     .poll(() =>
@@ -118,11 +126,11 @@ test("does not execute a destructive action when confirmation is canceled", asyn
   await createChat(page);
 
   const conversation = page.locator('[data-testid^="conversation-item-"]').first();
-  await conversation.click({ button: "right" });
-  await page.getByRole("button", { name: "Delete" }).last().click();
+  await openContextMenu(conversation);
+  await activate(page.getByRole("button", { name: "Delete" }).last());
   const confirmation = page.getByRole("dialog");
   await expect(confirmation).toContainText("move to Trash");
-  await confirmation.getByRole("button", { name: "Cancel" }).click();
+  await activate(confirmation.getByRole("button", { name: "Cancel" }));
   await expect(conversation).toBeVisible();
 });
 
@@ -133,36 +141,36 @@ test("moves a conversation to Trash, restores it, and creates a verified backup"
   await createChat(page);
 
   const conversation = page.locator('[data-testid^="conversation-item-"]').first();
-  await conversation.click({ button: "right" });
-  await page.getByRole("button", { name: "Delete" }).last().click();
+  await openContextMenu(conversation);
+  await activate(page.getByRole("button", { name: "Delete" }).last());
   const confirmation = page.getByRole("dialog");
   await expect(confirmation).toContainText("move to Trash");
-  await confirmation.getByRole("button", { name: "Delete" }).click();
+  await activate(confirmation.getByRole("button", { name: "Delete" }));
   await expect(conversation).toBeHidden();
 
-  await page.getByTitle("Settings").last().click();
+  await activate(page.getByTitle("Settings").last());
   const settings = page.getByTestId("settings-view");
-  await settings.getByRole("button", { name: "Data & privacy" }).click();
+  await activate(settings.getByRole("button", { name: "Data & privacy" }));
   await expect(
     settings.getByText("New ChatGPT conversation", { exact: true }),
   ).toBeVisible();
   await expect(settings.getByText(/Automatic cleanup:/)).toBeVisible();
-  await settings.getByRole("button", { name: "Restore", exact: true }).click();
+  await activate(settings.getByRole("button", { name: "Restore", exact: true }));
   await expect(settings.getByText("Trash is empty")).toBeVisible();
 
-  await settings.getByRole("button", { name: "Back up now" }).click();
+  await activate(settings.getByRole("button", { name: "Back up now" }));
   await expect(
     settings.getByRole("button", { name: "Restore", exact: true }),
   ).toBeVisible();
   await expect(settings.getByText("Manual", { exact: false })).toBeVisible();
 
-  await settings.getByTitle("Back to workspace").click();
+  await activate(settings.getByTitle("Back to workspace"));
   await expect(conversation).toBeVisible();
 });
 
 test("switches the complete settings navigation between English and Chinese", async ({ page }) => {
   await completeOnboarding(page);
-  await page.getByTitle("Settings").last().click();
+  await activate(page.getByTitle("Settings").last());
   const settings = page.getByTestId("settings-view");
 
   await settings.getByText("Language").locator("..").getByRole("combobox")
@@ -209,11 +217,10 @@ test("exports a valid privacy-filtered V1 data file", async ({
     });
   }, exportPath);
 
-  await page.getByTitle("Settings").last().click();
+  await activate(page.getByTitle("Settings").last());
   const settings = page.getByTestId("settings-view");
-  await settings.getByRole("button", { name: "Data & privacy" }).click();
-  await settings.getByRole("button", { name: "Export all conversations" })
-    .click();
+  await activate(settings.getByRole("button", { name: "Data & privacy" }));
+  await activate(settings.getByRole("button", { name: "Export all conversations" }));
 
   let exported = "";
   await expect.poll(async () => {
@@ -240,15 +247,14 @@ test("exports a valid privacy-filtered V1 data file", async ({
       filePaths: [source],
     });
   }, exportPath);
-  await settings.getByRole("button", { name: "Import all conversations" })
-    .click();
+  await activate(settings.getByRole("button", { name: "Import all conversations" }));
   const importPreview = page.getByRole("dialog");
   await expect(importPreview).toContainText("e2e-aihub-data.json");
   await expect(importPreview).toContainText("Conflicts (will be skipped)");
   await expect(importPreview).toContainText(
     "merge mode and never overwrites existing records",
   );
-  await importPreview.getByRole("button", { name: "Confirm" }).click();
+  await activate(importPreview.getByRole("button", { name: "Confirm" }));
   await expect(importPreview).toBeHidden();
   await expect(page.getByText(/Imported 0 conversations and 0 messages/))
     .toBeVisible();
@@ -259,7 +265,9 @@ test("renders provider failures and allows the same UI to recover", async ({ pag
   await createChat(page);
 
   await page.getByTestId("composer-input").fill("[mock:fail] exercise failure UI");
-  await page.getByTestId("send-message").click();
+  await activate(page.getByTestId("send-message"));
+  await expect(page.getByTestId("composer-input")).toHaveValue("");
+  await page.getByTestId("composer-input").fill("newer draft stays intact");
   const failedAssistant = page.locator(
     '[data-message-role="assistant"][data-message-status="failed"]',
   );
@@ -267,9 +275,12 @@ test("renders provider failures and allows the same UI to recover", async ({ pag
   await expect(
     failedAssistant.getByLabel("Retry", { exact: true }),
   ).toBeVisible();
+  await expect(page.getByTestId("composer-input")).toHaveValue(
+    "newer draft stays intact",
+  );
 
   await page.getByTestId("composer-input").fill("recovery succeeds");
-  await page.getByTestId("send-message").click();
+  await activate(page.getByTestId("send-message"));
   await expect(page.locator('[data-message-role="assistant"]').last()).toContainText(
     "Mock ChatGPT reply: recovery succeeds",
   );
@@ -284,8 +295,8 @@ test("cancels a slow mock generation through the visible stop control", async ({
   await createChat(page);
 
   await page.getByTestId("composer-input").fill("[mock:slow] cancel this response");
-  await page.getByTestId("send-message").click();
-  await page.getByTestId("stop-generation").click();
+  await activate(page.getByTestId("send-message"));
+  await activate(page.getByTestId("stop-generation"));
   const assistant = page.locator('[data-message-role="assistant"]').last();
   await expect(assistant).toHaveAttribute("data-message-status", "failed");
   await expect(page.getByTestId("send-message")).toBeVisible();
@@ -299,7 +310,7 @@ test("opens and closes the mock provider drawer without covering the workspace",
   const shell = page.getByTestId("app-shell");
   const chat = page.getByTestId("chat-view");
   const initialChatWidth = (await chat.boundingBox())!.width;
-  await page.getByTitle("Open provider page").click();
+  await activate(page.getByTitle("Open provider page"));
   await expect
     .poll(() => inlineDrawerColumnWidth(page))
     .toBeGreaterThanOrEqual(320);
@@ -310,17 +321,67 @@ test("opens and closes the mock provider drawer without covering the workspace",
   expect(openChatWidth).toBeLessThan(initialChatWidth);
   await expectInsideViewport(page, shell);
 
-  await page.getByTitle("Open provider page").click();
+  const handle = page.getByTestId("provider-resize-handle");
+  await dispatchInputKey(handle, "ArrowLeft");
+  await expect
+    .poll(() => page.evaluate(async () =>
+      (await window.aihub.getSettings()).providerSplitRatio,
+    ))
+    .toBeGreaterThan(0.42);
+
+  await activate(page.getByLabel("Hide AIHub client"));
+  await expect(shell).toHaveAttribute("data-pane-layout", "provider-only");
+  await expect(page.getByTestId("sidebar")).toHaveCount(0);
+  await activate(page.getByLabel("Show AIHub client"));
+  await expect(shell).toHaveAttribute("data-pane-layout", "split");
+
+  await activate(page.getByLabel("Hide provider website"));
   await expect
     .poll(() => inlineDrawerColumnWidth(page))
     .toBe(0);
   await expect.poll(() => nativeProviderDrawerWidth(electronApp)).toBe(0);
+  await activate(page.getByTestId("restore-provider-pane"));
+  await expect(shell).toHaveAttribute("data-pane-layout", "split");
+});
+
+test("auto-resizes the composer and switches to one pane on narrow windows", async ({ page }) => {
+  await completeOnboarding(page);
+  await createChat(page);
+
+  const composer = page.getByTestId("composer-input");
+  const initialHeight = (await composer.boundingBox())!.height;
+  await composer.fill(Array.from({ length: 18 }, (_, index) => `line ${index}`).join("\n"));
+  const expandedHeight = (await composer.boundingBox())!.height;
+  expect(expandedHeight).toBeGreaterThan(initialHeight);
+  await composer.fill("short");
+  expect((await composer.boundingBox())!.height).toBeLessThan(expandedHeight);
+
+  await activate(page.getByTitle("Open provider page"));
+  await expect(page.getByTestId("app-shell")).toHaveAttribute(
+    "data-pane-layout",
+    "split",
+  );
+  await page.setViewportSize({ width: 960, height: 821 });
+  await expect(page.getByTestId("app-shell")).toHaveAttribute(
+    "data-pane-layout",
+    "provider-only",
+  );
+  await activate(page.getByRole("button", { name: "AIHub", exact: true }));
+  await expect(page.getByTestId("app-shell")).toHaveAttribute(
+    "data-pane-layout",
+    "client-only",
+  );
+  await page.setViewportSize({ width: 1281, height: 821 });
+  await expect(page.getByTestId("app-shell")).toHaveAttribute(
+    "data-pane-layout",
+    "split",
+  );
 });
 
 test("rejects synthetic provider events while accepting AIHub trusted input", async ({ page, electronApp }) => {
   await completeOnboarding(page);
   await createChat(page);
-  await page.getByTitle("Open provider page").click();
+  await activate(page.getByTitle("Open provider page"));
 
   const syntheticResult = await electronApp.evaluate(async ({ webContents }) => {
     const provider = webContents
@@ -348,9 +409,9 @@ test("rejects synthetic provider events while accepting AIHub trusted input", as
     status: "untrusted submit rejected",
   });
 
-  await page.getByTitle("Open provider page").click();
+  await activate(page.getByTitle("Open provider page"));
   await page.getByTestId("composer-input").fill("trusted fixture succeeds");
-  await page.getByTestId("send-message").click();
+  await activate(page.getByTestId("send-message"));
   await expect(page.locator('[data-message-role="assistant"]').last()).toContainText(
     "Mock ChatGPT reply: trusted fixture succeeds",
   );
@@ -358,10 +419,10 @@ test("rejects synthetic provider events while accepting AIHub trusted input", as
 
 test("creates a comparison and displays independent mock replies", async ({ page }) => {
   await completeOnboarding(page);
-  await page.getByTestId("open-comparison").click();
+  await activate(page.getByTestId("open-comparison"));
   const modal = page.getByTestId("comparison-modal");
   await expect(modal).toBeVisible();
-  await modal.getByTestId("start-comparison").click();
+  await activate(modal.getByTestId("start-comparison"));
   const comparison = page.getByTestId("comparison-view");
   await expect(comparison).toBeVisible();
 
@@ -369,7 +430,7 @@ test("creates a comparison and displays independent mock replies", async ({ page
     "Send the same prompt to every provider",
   );
   await composer.fill("compare autonomous output");
-  await composer.press("Enter");
+  await dispatchInputKey(composer, "Enter");
   await expect(comparison.getByText("Mock ChatGPT reply: compare autonomous output")).toBeVisible();
   await expect(comparison.getByText("Mock Claude reply: compare autonomous output")).toBeVisible();
 });

@@ -13,12 +13,15 @@ import {
   type ProviderEvent,
   type ProviderId,
   type ProviderState,
+  type ProviderSurfaceLayout,
   type WebsiteConversationListSnapshot,
   type WebsiteConversationSnapshot,
 } from "@aihub/core";
 import type { ProviderClient } from "./provider-client";
 
 const TOPBAR_HEIGHT = 84;
+const HIDDEN_VIEWPORT_WIDTH = 1024;
+const HIDDEN_VIEWPORT_HEIGHT = 720;
 let trustedInteractionQueue = Promise.resolve();
 
 interface MockTurn {
@@ -44,7 +47,13 @@ export class MockProviderClient implements ProviderClient {
   private initializing?: Promise<void>;
   private attached = false;
   private visible = false;
-  private drawerWidth = 520;
+  private surfaceLayout: ProviderSurfaceLayout = {
+    surfaceVisible: false,
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+  };
   private cleanMode = false;
   private sequence = 0;
   private activeMessageId?: string;
@@ -69,6 +78,7 @@ export class MockProviderClient implements ProviderClient {
         nodeIntegration: false,
         sandbox: true,
         webSecurity: true,
+        backgroundThrottling: false,
       },
     });
   }
@@ -431,19 +441,27 @@ export class MockProviderClient implements ProviderClient {
     this.visible = visible;
     if (visible) this.ensureAttached();
     this.layout();
-    if (visible) this.view.webContents.focus();
+    if (visible && this.surfaceLayout.surfaceVisible) {
+      this.view.webContents.focus();
+    }
   }
 
-  layout(drawerWidth?: number): void {
-    if (drawerWidth !== undefined) this.drawerWidth = drawerWidth;
+  layout(surfaceLayout?: ProviderSurfaceLayout): void {
+    if (surfaceLayout !== undefined) this.surfaceLayout = surfaceLayout;
     if (!this.attached || this.mainWindow.isDestroyed()) return;
     const [width = 960, height = 640] = this.mainWindow.getContentSize();
-    const resolvedWidth = Math.min(width, Math.max(320, this.drawerWidth));
+    const showSurface = this.visible && this.surfaceLayout.surfaceVisible;
+    const resolvedWidth = showSurface
+      ? Math.max(1, Math.round(width * this.surfaceLayout.width))
+      : HIDDEN_VIEWPORT_WIDTH;
+    const resolvedHeight = showSurface
+      ? Math.max(1, Math.round(height * this.surfaceLayout.height))
+      : HIDDEN_VIEWPORT_HEIGHT;
     this.view.setBounds({
-      x: this.visible ? width - resolvedWidth : width,
-      y: TOPBAR_HEIGHT,
+      x: showSurface ? Math.round(width * this.surfaceLayout.x) : width,
+      y: showSurface ? Math.round(height * this.surfaceLayout.y) : 0,
       width: resolvedWidth,
-      height: Math.max(100, height - TOPBAR_HEIGHT),
+      height: resolvedHeight,
     });
   }
 
@@ -532,8 +550,11 @@ export class MockProviderClient implements ProviderClient {
       this.view.setBounds({
         x: 0,
         y: TOPBAR_HEIGHT,
-        width: Math.min(width, Math.max(320, this.drawerWidth)),
-        height: Math.max(100, height - TOPBAR_HEIGHT),
+        width: Math.min(width, HIDDEN_VIEWPORT_WIDTH),
+        height: Math.max(100, Math.min(
+          height - TOPBAR_HEIGHT,
+          HIDDEN_VIEWPORT_HEIGHT,
+        )),
       });
       await this.view.webContents.executeJavaScript(
         "new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))",

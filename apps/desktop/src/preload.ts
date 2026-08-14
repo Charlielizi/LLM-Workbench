@@ -99,8 +99,8 @@ const api: AIHubApi = {
     ipcRenderer.invoke("generation:cancel", provider),
   setProviderWebsiteVisible: (provider, visible) =>
     ipcRenderer.invoke("provider:set-visible", provider, visible),
-  setProviderLayout: (width) =>
-    ipcRenderer.invoke("provider:set-layout", { width }),
+  setProviderLayout: (layout) =>
+    ipcRenderer.invoke("provider:set-layout", layout),
   discoverProviderModels: (provider) =>
     ipcRenderer.invoke("provider:discover-models", provider),
   recoverProvider: (provider) =>
@@ -164,6 +164,11 @@ const api: AIHubApi = {
     ) => listener(conversationId);
     ipcRenderer.on("app:open-conversation", handler);
     return () => ipcRenderer.removeListener("app:open-conversation", handler);
+  },
+  onShowClientPane: (listener) => {
+    const handler = () => listener();
+    ipcRenderer.on("app:show-client-pane", handler);
+    return () => ipcRenderer.removeListener("app:show-client-pane", handler);
   },
   onUpdateState: (listener) => {
     const handler = (

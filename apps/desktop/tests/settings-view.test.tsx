@@ -143,8 +143,8 @@ describe("SettingsView", () => {
     await clickButton("Providers & sync");
     expect(container.textContent).toContain("Website drawer open");
     expect(container.textContent).toContain("Not ready");
-    const chatGptToggle = container.querySelector<HTMLInputElement>(
-      'input[aria-label="Enabled ChatGPT"]',
+    const chatGptToggle = container.querySelector<HTMLButtonElement>(
+      'button[role="switch"][aria-label="Use for new chats ChatGPT"]',
     );
     expect(chatGptToggle).not.toBeNull();
     await act(async () => chatGptToggle!.click());
@@ -160,8 +160,8 @@ describe("SettingsView", () => {
       }),
     );
     expect(
-      container.querySelector<HTMLInputElement>(
-        'input[aria-label="Enabled Claude"]',
+      container.querySelector<HTMLButtonElement>(
+        'button[role="switch"][aria-label="Use for new chats Claude"]',
       )?.disabled,
     ).toBe(true);
   });
@@ -274,7 +274,7 @@ describe("SettingsView", () => {
     });
   });
 
-  it("restores the previous workspace and provider drawer after settings", () => {
+  it("keeps the provider session requested while settings hides its surface", () => {
     useAppStore.setState({
       workspaceView: "comparison",
       activeComparisonId: "comparison-1",
@@ -286,17 +286,11 @@ describe("SettingsView", () => {
       previousWorkspaceView: "comparison",
       providerBeforeSettings: "claude",
     });
-    expect(window.aihub.setProviderWebsiteVisible).toHaveBeenCalledWith(
-      "claude",
-      false,
-    );
+    expect(window.aihub.setProviderWebsiteVisible).not.toHaveBeenCalled();
 
     useAppStore.getState().closeSettings();
     expect(useAppStore.getState().workspaceView).toBe("comparison");
-    expect(window.aihub.setProviderWebsiteVisible).toHaveBeenLastCalledWith(
-      "claude",
-      true,
-    );
+    expect(window.aihub.setProviderWebsiteVisible).not.toHaveBeenCalled();
   });
 
   function findLabel(text: string): HTMLLabelElement {

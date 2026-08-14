@@ -5,6 +5,7 @@ import {
   ArrowUp,
   ArchiveRestore,
   BookOpen,
+  CircleCheck,
   Database,
   Download,
   FolderPlus,
@@ -13,6 +14,7 @@ import {
   Info,
   Keyboard,
   Languages,
+  LogIn,
   Monitor,
   Plus,
   RefreshCw,
@@ -21,6 +23,7 @@ import {
   Sparkles,
   Tag,
   Trash2,
+  TriangleAlert,
   Upload,
 } from "lucide-react";
 import {
@@ -465,15 +468,30 @@ function ProviderSection() {
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-medium">{PROVIDER_LABELS[provider]}</span>
-                  <span
-                    className={`size-2 rounded-full ${
-                      state?.degraded
-                        ? "bg-[var(--color-danger)]"
-                        : state?.authenticated && state.ready
-                          ? "bg-[var(--color-online)]"
-                          : "bg-[var(--color-offline)]"
-                    }`}
-                  />
+                  {state?.degraded ||
+                  (state?.authenticated && !state.ready) ? (
+                    <TriangleAlert
+                      size={14}
+                      className={
+                        state?.degraded
+                          ? "text-[var(--color-danger)]"
+                          : "text-[var(--color-warning)]"
+                      }
+                      aria-hidden
+                    />
+                  ) : state?.authenticated && state.ready ? (
+                    <CircleCheck
+                      size={14}
+                      className="text-[var(--color-online)]"
+                      aria-hidden
+                    />
+                  ) : (
+                    <LogIn
+                      size={14}
+                      className="text-[var(--color-offline)]"
+                      aria-hidden
+                    />
+                  )}
                   <span className="text-xs text-[var(--color-text-tertiary)]">
                     {status}
                   </span>
@@ -489,28 +507,61 @@ function ProviderSection() {
                   </p>
                 )}
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <SmallButton
-                    label={t("provider.open")}
-                    onClick={() =>
-                      void window.aihub.setProviderWebsiteVisible(provider, true)
-                    }
-                  />
-                  <SmallButton
-                    label={t("provider.recover")}
-                    onClick={() =>
-                      void window.aihub.recoverProvider(provider).catch((cause) =>
-                        addToast(errorText(cause), "error"),
-                      )
-                    }
-                  />
-                  <SmallButton
-                    label={t("provider.syncNow")}
-                    onClick={() =>
-                      void window.aihub.syncWebHistory(provider).catch((cause) =>
-                        addToast(errorText(cause), "error"),
-                      )
-                    }
-                  />
+                  {!state?.authenticated && !state?.degraded ? (
+                    <SmallButton
+                      label={t("provider.action.openLogin")}
+                      onClick={() =>
+                        void window.aihub.setProviderWebsiteVisible(
+                          provider,
+                          true,
+                        )
+                      }
+                    />
+                  ) : state?.degraded || !state?.ready ? (
+                    <>
+                      <SmallButton
+                        label={t("provider.action.openRecovery")}
+                        onClick={() =>
+                          void window.aihub.setProviderWebsiteVisible(
+                            provider,
+                            true,
+                          )
+                        }
+                      />
+                      <SmallButton
+                        label={t("provider.action.recheck")}
+                        onClick={() =>
+                          void window.aihub
+                            .recoverProvider(provider)
+                            .catch((cause) =>
+                              addToast(errorText(cause), "error"),
+                            )
+                        }
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <SmallButton
+                        label={t("provider.open")}
+                        onClick={() =>
+                          void window.aihub.setProviderWebsiteVisible(
+                            provider,
+                            true,
+                          )
+                        }
+                      />
+                      <SmallButton
+                        label={t("provider.syncNow")}
+                        onClick={() =>
+                          void window.aihub
+                            .syncWebHistory(provider)
+                            .catch((cause) =>
+                              addToast(errorText(cause), "error"),
+                            )
+                        }
+                      />
+                    </>
+                  )}
                   <SmallButton
                     label={t("provider.clearData")}
                     danger
@@ -518,28 +569,29 @@ function ProviderSection() {
                   />
                 </div>
               </div>
-              <div className="flex items-center gap-1">
-                <IconButton
-                  label={t("provider.moveUp")}
-                  disabled={index === 0}
-                  onClick={() => settings.moveProvider(provider, -1)}
-                >
-                  <ArrowUp size={14} />
-                </IconButton>
-                <IconButton
-                  label={t("provider.moveDown")}
-                  disabled={index === settings.providerOrder.length - 1}
-                  onClick={() => settings.moveProvider(provider, 1)}
-                >
-                  <ArrowDown size={14} />
-                </IconButton>
-                <input
-                  type="checkbox"
-                  aria-label={`${enabled ? t("common.enabled") : t("common.disabled")} ${PROVIDER_LABELS[provider]}`}
-                  checked={enabled}
+              <div className="flex flex-col items-end gap-2">
+                <div className="flex items-center gap-1">
+                  <IconButton
+                    label={t("provider.moveUp")}
+                    disabled={index === 0}
+                    onClick={() => settings.moveProvider(provider, -1)}
+                  >
+                    <ArrowUp size={14} />
+                  </IconButton>
+                  <IconButton
+                    label={t("provider.moveDown")}
+                    disabled={index === settings.providerOrder.length - 1}
+                    onClick={() => settings.moveProvider(provider, 1)}
+                  >
+                    <ArrowDown size={14} />
+                  </IconButton>
+                </div>
+                <ProviderEnableSwitch
+                  provider={provider}
+                  enabled={enabled}
                   disabled={enabled && settings.enabledProviders.length === 1}
-                  onChange={(event) =>
-                    settings.setProviderEnabled(provider, event.target.checked)
+                  onChange={(next) =>
+                    settings.setProviderEnabled(provider, next)
                   }
                 />
               </div>
@@ -1892,6 +1944,56 @@ function NameEntryDialog({
         </div>
       </form>
     </Dialog>
+  );
+}
+
+function ProviderEnableSwitch({
+  provider,
+  enabled,
+  disabled,
+  onChange,
+}: {
+  provider: ProviderId;
+  enabled: boolean;
+  disabled: boolean;
+  onChange: (enabled: boolean) => void;
+}) {
+  const { t } = useI18n();
+  const descriptionId = `provider-new-entry-${provider}`;
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-right">
+        <span className="block whitespace-nowrap text-xs font-medium">
+          {t("provider.newEntry")}
+        </span>
+        <span
+          id={descriptionId}
+          className="sr-only"
+        >
+          {t("provider.newEntryDescription")}
+        </span>
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        aria-describedby={descriptionId}
+        aria-label={`${t("provider.newEntry")} ${PROVIDER_LABELS[provider]}`}
+        disabled={disabled}
+        onClick={() => onChange(!enabled)}
+        className={`relative h-6 w-11 shrink-0 rounded-full border transition disabled:cursor-not-allowed disabled:opacity-40 ${
+          enabled
+            ? "border-[var(--color-send-bg)] bg-[var(--color-send-bg)]"
+            : "border-[var(--color-border-strong)] bg-[var(--color-bg-inset)]"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 size-4 rounded-full bg-white shadow transition-transform ${
+            enabled ? "translate-x-5" : "translate-x-1"
+          }`}
+        />
+      </button>
+    </div>
   );
 }
 

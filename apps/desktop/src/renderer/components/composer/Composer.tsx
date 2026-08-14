@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   FileText,
@@ -20,6 +20,7 @@ import { useAppStore } from "../../stores/app-store";
 import { useComposerStore } from "../../stores/composer-store";
 import { useToastStore } from "../../stores/toast-store";
 import { useI18n } from "../../i18n";
+import { useSettingsStore } from "../../stores/settings-store";
 import { estimateTokens } from "../../utils/token-estimate";
 import { shouldShowAttachmentControl } from "../../utils/provider-capabilities";
 
@@ -35,6 +36,9 @@ export function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
+  const [viewportHeight, setViewportHeight] = useState(
+    () => window.innerHeight,
+  );
   const drafts = useComposerStore((state) => state.drafts);
   const setDraft = useComposerStore((state) => state.setDraft);
   const clearDraft = useComposerStore((state) => state.clearDraft);
@@ -60,6 +64,7 @@ export function Composer({
     state.messageErrors.get(conversation.id),
   );
   const addToast = useToastStore((state) => state.addToast);
+  const density = useSettingsStore((state) => state.density);
   const systemPrompts = useAppStore((state) => state.systemPrompts);
   const setSystemPromptModalOpen = useAppStore(
     (state) => state.setSystemPromptModalOpen,
@@ -99,12 +104,25 @@ export function Composer({
       (prompt) => prompt.isDefault && !prompt.provider,
     );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
-    textarea.style.height = "0px";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 220)}px`;
-  }, [text]);
+    textarea.style.height = "auto";
+    const height = measureComposerHeight(
+      textarea.scrollHeight,
+      density,
+      viewportHeight,
+    );
+    textarea.style.height = `${height}px`;
+    textarea.style.overflowY =
+      textarea.scrollHeight > height ? "auto" : "hidden";
+  }, [density, text, conversation.id, viewportHeight]);
+
+  useEffect(() => {
+    const updateViewportHeight = () => setViewportHeight(window.innerHeight);
+    window.addEventListener("resize", updateViewportHeight);
+    return () => window.removeEventListener("resize", updateViewportHeight);
+  }, []);
 
   useEffect(() => {
     setAttachments([]);
@@ -132,7 +150,14 @@ export function Composer({
   }
 
   async function send() {
-    if (!text.trim() && !attachments.length) return;
+    if (
+      conversationBusy ||
+      (!text.trim() && !attachments.length)
+    ) {
+      return;
+    }
+    const submittedText = text;
+    const submittedAttachments = [...attachments];
     const outgoing = attachments.flatMap((file): OutgoingAttachment[] => {
       const localPath = window.aihub.getLocalFilePath(file);
       if (!localPath) return [];
@@ -147,16 +172,26 @@ export function Composer({
       addToast(t("chat.attachmentPathFailed"), "error", 5000);
       return;
     }
-    if (
-      await sendMessage({
-        text,
-        attachments: outgoing,
-        modes: selectedModes,
-        model: selectedModel,
-      })
-    ) {
-      clearDraft(conversation.id);
-      setAttachments([]);
+    const submission = sendMessage({
+      text,
+      attachments: outgoing,
+      modes: selectedModes,
+      model: selectedModel,
+    });
+    clearDraft(conversation.id);
+    setAttachments([]);
+    if (!(await submission)) {
+      const currentDraft =
+        useComposerStore.getState().drafts[conversation.id] ?? "";
+      if (!currentDraft) {
+        setDraft(conversation.id, submittedText);
+        if (
+          useAppStore.getState().selectedConversationId === conversation.id
+        ) {
+          setAttachments(submittedAttachments);
+        }
+      }
+      addToast(t("chat.sendFailedDraftRestored"), "error", 5000);
     }
   }
 
@@ -294,6 +329,10 @@ export function Composer({
                         current.filter((item) => item !== file),
                       )
                     }
+                    aria-label={t("chat.removeAttachment", {
+                      name: file.name,
+                    })}
+                    title={t("chat.removeAttachment", { name: file.name })}
                   >
                     <X size={12} />
                   </button>
@@ -305,7 +344,11 @@ export function Composer({
           <textarea
             data-testid="composer-input"
             ref={textareaRef}
-            className="block max-h-[220px] min-h-[88px] w-full resize-none overflow-y-auto border-0 bg-transparent px-2 pb-3 pt-2 text-[15px] leading-7 outline-none placeholder:text-[var(--color-text-tertiary)]"
+            className="block w-full resize-none overflow-y-hidden border-0 bg-transparent px-2 pb-3 pt-2 text-[15px] leading-7 outline-none placeholder:text-[var(--color-text-tertiary)]"
+            style={{
+              minHeight: density === "compact" ? 44 : 56,
+              maxHeight: "min(320px, 38vh)",
+            }}
             value={text}
             placeholder={t("chat.messagePlaceholder", {
               provider: PROVIDER_LABELS[conversation.provider],
@@ -401,7 +444,7 @@ export function Composer({
             {streaming ? (
               <button
                 data-testid="stop-generation"
-                className="interactive-chip grid size-11 place-items-center rounded-full border border-[var(--color-border)] bg-[var(--color-bg-elevated)] text-[var(--color-text-primary)]"
+                className="interactive-chip grid size-11 place-items-center rounded-full border border-[var(--color-danger)] bg-[var(--color-danger)] text-white shadow-[var(--shadow-sm)] hover:brightness-110"
                 onClick={() => void cancelGeneration(conversation.provider)}
                 aria-label={t("chat.stop")}
                 title={t("chat.stop")}
@@ -441,10 +484,21 @@ function IconChip({
       className="interactive-chip grid size-8 place-items-center rounded-full border border-[var(--color-border)] bg-[var(--color-bg-soft)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
       onClick={onClick}
       title={title}
+      aria-label={title}
     >
       {children}
     </button>
   );
+}
+
+export function measureComposerHeight(
+  scrollHeight: number,
+  density: "comfortable" | "compact",
+  viewportHeight: number,
+): number {
+  const minimum = density === "compact" ? 44 : 56;
+  const maximum = Math.max(minimum, Math.min(320, viewportHeight * 0.38));
+  return Math.round(Math.min(maximum, Math.max(minimum, scrollHeight)));
 }
 
 function attachmentKind(file: File): AttachmentKind {

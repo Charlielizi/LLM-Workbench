@@ -25,6 +25,7 @@ import {
   providerTransportEventSchema,
   providerAdapterEventsQuerySchema,
   providerCleanModeSchema,
+  providerDebugDumpSchema,
   currentWebConversationSyncResultSchema,
   sendMessageSchema,
   transferConfirmSchema,
@@ -536,8 +537,32 @@ describe("trusted IPC schemas", () => {
   });
 
   it("validates provider layout, prompts, transfers, and comparisons", () => {
-    expect(providerLayoutSchema.parse({ width: 520 }).width).toBe(520);
-    expect(() => providerLayoutSchema.parse({ width: 100 })).toThrow();
+    expect(providerLayoutSchema.parse({
+      surfaceVisible: true,
+      x: 0.6,
+      y: 0.1,
+      width: 0.4,
+      height: 0.9,
+    }).width).toBe(0.4);
+    expect(() => providerLayoutSchema.parse({
+      surfaceVisible: true,
+      x: 0.8,
+      y: 0.1,
+      width: 0.4,
+      height: 0.9,
+    })).toThrow();
+    expect(() => providerLayoutSchema.parse({
+      surfaceVisible: true,
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+    })).toThrow();
+    expect(providerDebugDumpSchema.parse("redacted diagnostics")).toBe(
+      "redacted diagnostics",
+    );
+    expect(() => providerDebugDumpSchema.parse("x".repeat(1_000_001)))
+      .toThrow();
     expect(
       systemPromptCreateSchema.parse({
         name: "Concise",

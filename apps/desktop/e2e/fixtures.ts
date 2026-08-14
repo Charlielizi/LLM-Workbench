@@ -109,7 +109,31 @@ export const test = base.extend<ElectronFixtures>({
 
   page: async ({ electronApp }, use, testInfo) => {
     const page = await electronApp.firstWindow({ timeout: 15_000 });
+    await electronApp.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.focus();
+    });
+    await page.bringToFront();
     await page.setViewportSize({ width: 1281, height: 821 });
+    await expect(page.locator("html")).toHaveAttribute("data-motion", "reduced");
+    await page.evaluate(() => {
+      const windowErrors: string[] = [];
+      (globalThis as typeof globalThis & { __aihubE2EWindowErrors?: string[] })
+        .__aihubE2EWindowErrors = windowErrors;
+      window.addEventListener("error", (event) => {
+        windowErrors.push([
+          event.message,
+          event.filename,
+          String(event.lineno),
+          event.error instanceof Error ? event.error.stack ?? event.error.message : "",
+        ].join(" | "));
+      });
+      window.addEventListener("unhandledrejection", (event) => {
+        const reason = event.reason;
+        windowErrors.push(
+          `unhandledrejection | ${reason instanceof Error ? reason.stack ?? reason.message : String(reason)}`,
+        );
+      });
+    });
     const runtimeErrors: string[] = [];
     page.on("console", (message) => {
       if (message.type() === "error") {
@@ -148,6 +172,17 @@ export const test = base.extend<ElectronFixtures>({
       if (runtimeErrors.length > 0) {
         await testInfo.attach("runtime-errors", {
           body: Buffer.from(runtimeErrors.join("\n\n"), "utf8"),
+          contentType: "text/plain",
+        });
+      }
+      const windowErrors = await page.evaluate(() =>
+        (globalThis as typeof globalThis & {
+          __aihubE2EWindowErrors?: string[];
+        }).__aihubE2EWindowErrors ?? [],
+      ).catch(() => []);
+      if (windowErrors.length > 0) {
+        await testInfo.attach("window-errors", {
+          body: Buffer.from(windowErrors.join("\n\n"), "utf8"),
           contentType: "text/plain",
         });
       }
@@ -364,7 +399,9 @@ function seedTestLocale(testUserData: string): void {
   try {
     database.setSettings({
       ...database.getSettings(),
+      theme: "light",
       locale: "en-US",
+      motion: "reduced",
     });
   } finally {
     database.close();

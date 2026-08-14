@@ -209,9 +209,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     const visibleProvider = get().snapshot.providers.find(
       (provider) => provider.websiteVisible,
     );
-    if (visibleProvider) {
-      void window.aihub.setProviderWebsiteVisible(visibleProvider.id, false);
-    }
     set({
       workspaceView: "settings",
       previousWorkspaceView:
@@ -229,12 +226,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       workspaceView: state.previousWorkspaceView,
       providerBeforeSettings: undefined,
     });
-    if (state.providerBeforeSettings) {
-      void window.aihub.setProviderWebsiteVisible(
-        state.providerBeforeSettings,
-        true,
-      );
-    }
   },
   setSettingsSection: (settingsSection) => set({ settingsSection }),
 

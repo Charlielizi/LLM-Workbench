@@ -52,6 +52,7 @@ import {
   type ProviderSendPhase,
   type ProviderSmokeInspection,
   type ProviderSummary,
+  type ProviderSurfaceLayout,
   type ProviderSmokeTestResult,
   type SystemPrompt,
   type SettingsImportPreview,
@@ -110,7 +111,13 @@ export class AppService {
       providerHtml?: string;
     }
   >();
-  private providerDrawerWidth = 520;
+  private providerSurfaceLayout: ProviderSurfaceLayout = {
+    surfaceVisible: false,
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+  };
   private providerBackends: Partial<Record<ProviderId, ProviderBackendMode>> = {};
   private providerApiConfigs: Partial<Record<ProviderId, ProviderApiConfig>> = {};
   private autoSyncWebHistory = true;
@@ -1969,7 +1976,7 @@ export class AppService {
       const state = this.states.get(id);
       if (state) state.websiteVisible = id === provider ? visible : false;
     }
-    this.setProviderLayout(this.providerDrawerWidth);
+    this.setProviderLayout(this.providerSurfaceLayout);
     this.emitSnapshot();
   }
 
@@ -2003,10 +2010,10 @@ export class AppService {
     };
   }
 
-  setProviderLayout(width: number): void {
-    this.providerDrawerWidth = width;
+  setProviderLayout(layout: ProviderSurfaceLayout): void {
+    this.providerSurfaceLayout = layout;
     Object.values(this.runtimes).forEach((runtime) =>
-      runtime.layout(this.providerDrawerWidth),
+      runtime.layout(this.providerSurfaceLayout),
     );
   }
 
@@ -2015,6 +2022,19 @@ export class AppService {
     if (provider) {
       void this.setWebsiteVisible(provider, false);
     }
+  }
+
+  showClientByWebContents(webContents: Electron.WebContents): void {
+    if (!this.providerForWebContents(webContents)) return;
+    this.window.webContents.send("app:show-client-pane");
+  }
+
+  getHostLocale(): "zh-CN" | "en-US" {
+    const locale = this.getSettings().locale;
+    if (locale === "zh-CN" || locale === "en-US") return locale;
+    return app.getLocale().toLowerCase().startsWith("zh")
+      ? "zh-CN"
+      : "en-US";
   }
 
   private providerForWebContents(
@@ -2298,7 +2318,7 @@ export class AppService {
 
   layout(): void {
     Object.values(this.runtimes).forEach((runtime) =>
-      runtime.layout(this.providerDrawerWidth),
+      runtime.layout(this.providerSurfaceLayout),
     );
   }
 
@@ -2347,7 +2367,7 @@ export class AppService {
       const state = this.states.get(id);
       if (state) state.websiteVisible = id === provider;
     }
-    this.setProviderLayout(this.providerDrawerWidth);
+    this.setProviderLayout(this.providerSurfaceLayout);
     this.emitSnapshot();
   }
 

@@ -10,6 +10,7 @@ import type {
   ProviderEvent,
   ProviderId,
   ProviderState,
+  ProviderSurfaceLayout,
   WebsiteConversationListSnapshot,
   WebsiteConversationSnapshot,
 } from "@aihub/core";
@@ -37,7 +38,7 @@ export interface ProviderClient {
   clearSiteData(): Promise<ProviderState>;
   checkCompletion(): Promise<void>;
   setVisible(visible: boolean): void;
-  layout(drawerWidth?: number): void;
+  layout(surfaceLayout?: ProviderSurfaceLayout): void;
   isVisible(): boolean;
   ownsWebContents(webContents: WebContents): boolean;
   destroy(): void;
@@ -522,8 +523,8 @@ export class ManualProviderClient implements ProviderClient {
     this.webClient.setVisible(visible);
   }
 
-  layout(drawerWidth?: number): void {
-    this.webClient.layout(drawerWidth);
+  layout(surfaceLayout?: ProviderSurfaceLayout): void {
+    this.webClient.layout(surfaceLayout);
   }
 
   isVisible(): boolean {

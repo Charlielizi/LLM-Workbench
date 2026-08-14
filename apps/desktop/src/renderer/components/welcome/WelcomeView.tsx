@@ -1,10 +1,12 @@
 import { useState } from "react";
 import {
   ArrowRight,
+  AlertTriangle,
   Bot,
   CheckCircle2,
   Database,
   Globe2,
+  LogIn,
   Sparkles,
 } from "lucide-react";
 import { PROVIDER_LABELS } from "@aihub/core";
@@ -114,7 +116,7 @@ export function WelcomeView() {
           <button
             className="interactive-chip mt-7 inline-flex items-center gap-2 rounded-full bg-[var(--color-send-bg)] px-5 py-3 font-medium text-[var(--color-send-text)] shadow-[var(--shadow-sm)]"
             onClick={() => {
-              if (step < steps.length - 1) setStep(step + 1);
+              if (step < steps.length - 1) setStep((currentStep) => currentStep + 1);
               else setCompleted(true);
             }}
           >
@@ -188,24 +190,55 @@ export function WelcomeView() {
               .filter((provider) => enabledProviders.includes(provider))
               .map((provider) => {
               const state = providers.find((item) => item.id === provider);
+              const ready = Boolean(state?.authenticated && state.ready);
+              const degraded = Boolean(state?.degraded);
+              const StatusIcon = degraded
+                ? AlertTriangle
+                : ready
+                  ? CheckCircle2
+                  : LogIn;
+              const status = degraded
+                ? t("provider.status.degraded")
+                : ready
+                  ? t("provider.status.online")
+                  : t("provider.status.login");
+              const action = degraded
+                ? t("provider.action.openRecovery")
+                : ready
+                  ? t("provider.action.startChat")
+                  : t("provider.action.openLogin");
               return (
                 <button
                   key={provider}
-                  className="interactive-chip flex items-center gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-soft)] px-4 py-3 text-left hover:bg-[var(--color-bg-hover)]"
-                  onClick={() =>
-                    void window.aihub.setProviderWebsiteVisible(provider, true)
-                  }
+                  className="interactive-chip grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-soft)] px-4 py-3 text-left hover:bg-[var(--color-bg-hover)]"
+                  onClick={() => {
+                    if (ready) {
+                      void createConversation(provider);
+                    } else {
+                      void window.aihub.setProviderWebsiteVisible(provider, true);
+                    }
+                  }}
                 >
-                  <CheckCircle2
+                  <StatusIcon
                     size={15}
                     className={
-                      state?.authenticated
-                        ? "text-[var(--color-online)]"
-                        : "text-[var(--color-offline)]"
+                      degraded
+                        ? "text-[var(--color-danger)]"
+                        : ready
+                          ? "text-[var(--color-online)]"
+                          : "text-[var(--color-offline)]"
                     }
                   />
-                  <span className="text-sm text-[var(--color-text-secondary)]">
-                    {PROVIDER_LABELS[provider]}
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm text-[var(--color-text-secondary)]">
+                      {PROVIDER_LABELS[provider]}
+                    </span>
+                    <span className="block text-[11px] text-[var(--color-text-tertiary)]">
+                      {status}
+                    </span>
+                  </span>
+                  <span className="text-[11px] font-medium text-[var(--color-text-primary)]">
+                    {action}
                   </span>
                 </button>
               );

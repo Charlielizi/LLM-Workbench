@@ -397,6 +397,9 @@ export function Sidebar() {
           <ConversationList
             conversations={conversations}
             searching={Boolean(query.trim())}
+            emptyProvider={
+              providerFilter === "all" ? defaultProvider : providerFilter
+            }
             selectionMode={selectionMode}
             selectedIds={selectedIds}
             onToggleSelection={toggleSelection}

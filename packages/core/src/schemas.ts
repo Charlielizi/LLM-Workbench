@@ -508,8 +508,20 @@ export const messageEditResendSchema = z.object({
 });
 
 export const providerLayoutSchema = z.object({
-  width: z.number().int().min(320).max(1_200),
-});
+  surfaceVisible: z.boolean(),
+  x: z.number().finite().min(0).max(1),
+  y: z.number().finite().min(0).max(1),
+  width: z.number().finite().min(0).max(1),
+  height: z.number().finite().min(0).max(1),
+}).refine(
+  (layout) =>
+    layout.x + layout.width <= 1.000_001 &&
+    layout.y + layout.height <= 1.000_001 &&
+    (!layout.surfaceVisible || (layout.width > 0 && layout.height > 0)),
+  "Provider surface bounds must stay inside the window.",
+);
+
+export const providerDebugDumpSchema = z.string().max(1_000_000);
 
 export const systemPromptCreateSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -665,6 +677,7 @@ export const appSettingsSchema = z.object({
   sidebarWidth: z.number().min(200).max(480).optional(),
   sidebarCollapsed: z.boolean().optional(),
   providerDrawerWidth: z.number().min(320).max(1_200).optional(),
+  providerSplitRatio: z.number().min(0.25).max(0.7).optional(),
   hasCompletedOnboarding: z.boolean().optional(),
   shortcuts: z.record(z.string(), z.string()).optional(),
 });

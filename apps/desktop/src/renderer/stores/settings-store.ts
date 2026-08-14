@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   DEFAULT_APP_SETTINGS,
   normalizeAppSettings,
+  normalizeProviderSplitRatio,
   type AppSettingsPayload,
   type CloseBehavior,
   type ContrastMode,
@@ -88,6 +89,7 @@ interface SettingsState extends NormalizedAppSettings {
   setSidebarWidth: (width: number) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setProviderDrawerWidth: (width: number) => void;
+  setProviderSplitRatio: (ratio: number) => void;
   setHasCompletedOnboarding: (completed: boolean) => void;
   setShortcut: (action: ShortcutAction, binding: string) => void;
   clearShortcut: (action: ShortcutAction) => void;
@@ -241,6 +243,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     setSidebarCollapsed: (sidebarCollapsed) => commit({ sidebarCollapsed }),
     setProviderDrawerWidth: (width) =>
       commit({ providerDrawerWidth: normalizeProviderDrawerWidth(width) }),
+    setProviderSplitRatio: (providerSplitRatio) =>
+      commit({ providerSplitRatio: normalizeProviderSplitRatio(providerSplitRatio) }),
     setHasCompletedOnboarding: (hasCompletedOnboarding) =>
       commit({ hasCompletedOnboarding }),
     setShortcut: (action, binding) => {
@@ -270,6 +274,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
             providerDrawerWidth: normalizeProviderDrawerWidth(
               remote.providerDrawerWidth ??
                 DEFAULT_APP_SETTINGS.providerDrawerWidth,
+            ),
+            providerSplitRatio: normalizeProviderSplitRatio(
+              remote.providerSplitRatio,
             ),
             shortcuts,
           }),
@@ -370,6 +377,7 @@ export function settingsPayload(state: SettingsState): AppSettingsPayload {
     sidebarWidth: state.sidebarWidth,
     sidebarCollapsed: state.sidebarCollapsed,
     providerDrawerWidth: state.providerDrawerWidth,
+    providerSplitRatio: state.providerSplitRatio,
     hasCompletedOnboarding: state.hasCompletedOnboarding,
     shortcuts: state.shortcuts,
   };
