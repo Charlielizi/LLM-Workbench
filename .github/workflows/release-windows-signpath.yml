@@ -58,6 +58,9 @@ jobs:
       - name: Build Electron test bundle
         run: pnpm --filter @aihub/desktop build
 
+      - name: Warm Electron binary cache
+        run: pnpm --filter @aihub/desktop exec electron --version
+
       - name: Run Electron E2E tests
         run: pnpm --filter @aihub/desktop test:ai:e2e
 
