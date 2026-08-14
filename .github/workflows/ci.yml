@@ -1,0 +1,72 @@
+name: Windows CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate desktop and native clients
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck workspace
+        run: pnpm typecheck
+
+      - name: Run workspace tests
+        run: pnpm test
+
+      - name: Build Electron test bundle
+        run: pnpm --filter @aihub/desktop build
+
+      - name: Run Electron E2E tests
+        run: pnpm --filter @aihub/desktop test:ai:e2e
+
+      - name: Run Windows Native tests
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDIR)) {
+            $env:WINDIR = $env:SystemRoot
+          }
+          dotnet test .\apps\AIHub.Windows.sln `
+            --configuration Release `
+            --arch x64 `
+            --logger "console;verbosity=normal"
+
+      - name: Upload validation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-ci-validation-${{ github.run_id }}
+          if-no-files-found: ignore
+          path: |
+            artifacts/ai-validation
+            apps/desktop/test-results

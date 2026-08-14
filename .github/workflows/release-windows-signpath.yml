@@ -32,6 +32,11 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -49,6 +54,23 @@ jobs:
 
       - name: Run desktop tests
         run: pnpm --filter @aihub/desktop test
+
+      - name: Build Electron test bundle
+        run: pnpm --filter @aihub/desktop build
+
+      - name: Run Electron E2E tests
+        run: pnpm --filter @aihub/desktop test:ai:e2e
+
+      - name: Run Windows Native tests
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDIR)) {
+            $env:WINDIR = $env:SystemRoot
+          }
+          dotnet test .\apps\AIHub.Windows.sln `
+            --configuration Release `
+            --arch x64 `
+            --logger "console;verbosity=normal"
 
       - name: Build unsigned Squirrel package
         run: pnpm --filter @aihub/desktop package
