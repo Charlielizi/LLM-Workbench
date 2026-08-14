@@ -77,6 +77,7 @@ test("shows local history first and synchronizes website history idempotently", 
   expect(firstRemoteSyncedAt).toBeTruthy();
 
   await closeTestElectron(electronApp, testUserData);
+  await new Promise((resolve) => setTimeout(resolve, 1_500));
   const restartedApp = await launchTestElectron(
     testUserData,
     "chatgpt",

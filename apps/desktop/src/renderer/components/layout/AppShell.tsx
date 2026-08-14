@@ -149,7 +149,7 @@ export function AppShell({
 
   useLayoutEffect(() => {
     sendSurfaceLayout();
-    const layoutTimers = [0, 100, 500].map((delay) =>
+    const layoutTimers = [0, 100, 500, 1_000, 2_000, 4_000, 8_000, 12_000].map((delay) =>
       window.setTimeout(sendSurfaceLayout, delay),
     );
     const shell = shellRef.current;
